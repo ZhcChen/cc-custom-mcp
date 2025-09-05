@@ -1,0 +1,43 @@
+{
+  "name": "cc-custom-mcp",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "tauri:dev": "MCP_DEV_MODE=true tauri dev",
+    "tauri:build": "node scripts/update-app-name.cjs && tauri build && node scripts/restore-app-name.cjs",
+    "build:all": "bash scripts/build-all.sh",
+    "build:all:win": "scripts/build-all.bat",
+    "build:all:ps": "powershell -ExecutionPolicy Bypass -File scripts/build-all.ps1",
+    "build:clean": "powershell -ExecutionPolicy Bypass -File scripts/build-all.ps1 -CleanOnly",
+    "build:macos": "NODE_ENV=production node scripts/update-app-name.cjs && MCP_DEV_MODE=false tauri build --target aarch64-apple-darwin && tauri build --target x86_64-apple-darwin && MCP_DEV_MODE=false bash scripts/generate-mcp-config.sh && node scripts/restore-app-name.cjs",
+    "build:windows": "NODE_ENV=production node scripts/update-app-name.cjs && MCP_DEV_MODE=false tauri build --target aarch64-pc-windows-msvc && tauri build --target x86_64-pc-windows-msvc && MCP_DEV_MODE=false bash scripts/generate-mcp-config.sh && node scripts/restore-app-name.cjs",
+    "build:linux": "NODE_ENV=production node scripts/update-app-name.cjs && MCP_DEV_MODE=false tauri build --target aarch64-unknown-linux-gnu && tauri build --target x86_64-unknown-linux-gnu && MCP_DEV_MODE=false bash scripts/generate-mcp-config.sh && node scripts/restore-app-name.cjs",
+    "mcp:dev": "bash scripts/dev-mcp.sh",
+    "mcp:prod": "bash scripts/prod-mcp.sh",
+    "mcp:build:dev": "cd src-tauri && cargo build",
+    "mcp:build:prod": "cd src-tauri && cargo build --release",
+
+    "mcp:setup": "bash scripts/setup-dev-prod-separation.sh",
+    "config:dev": "MCP_DEV_MODE=true bash scripts/generate-mcp-config.sh",
+    "config:prod": "MCP_DEV_MODE=false bash scripts/generate-mcp-config.sh"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-opener": "^2",
+    "vue": "^3.5.13",
+    "vue-i18n": "^9.14.5",
+    "vue-router": "^4.5.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "typescript": "~5.6.2",
+    "vite": "^6.0.3",
+    "vue-tsc": "^2.1.10"
+  }
+}
