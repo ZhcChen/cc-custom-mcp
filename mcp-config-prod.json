@@ -4,10 +4,9 @@
       "command": "/Users/chen/code/cc-custom-mcp/src-tauri/target/aarch64-apple-darwin/release/cc-custom-mcp",
       "args": ["--mcp-mode"],
       "env": {
-        "MCP_DEV_MODE": "false",
         "MCP_LOG_LEVEL": "info"
       },
-      "timeout": 600,
+      "timeout": 600000,
       "autoApprove": ["file_read", "system_info"],
       "description": "Local MCP Tools (Production)"
     }

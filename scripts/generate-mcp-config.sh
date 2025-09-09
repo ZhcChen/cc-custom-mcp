@@ -19,11 +19,10 @@ if [ "$IS_DEV" = "true" ]; then
       "command": "$PROJECT_DIR/src-tauri/target/debug/cc-custom-mcp",
       "args": ["--mcp-mode"],
       "env": {
-        "MCP_DEV_MODE": "true",
         "MCP_LOG_LEVEL": "debug",
         "MCP_DATA_DIR": "$PROJECT_DIR/dev-data"
       },
-      "timeout": 300,
+      "timeout": 600000,
       "autoApprove": ["file_read", "system_info", "feedback"],
       "description": "Local MCP Tools (Development)"
     }
@@ -57,10 +56,9 @@ else
       "command": "$PROD_COMMAND",
       "args": ["--mcp-mode"],
       "env": {
-        "MCP_DEV_MODE": "false",
         "MCP_LOG_LEVEL": "info"
       },
-      "timeout": 600,
+      "timeout": 600000,
       "autoApprove": ["file_read", "system_info"],
       "description": "Local MCP Tools (Production)"
     }

@@ -3,16 +3,12 @@ import { onMounted, onUnmounted } from 'vue'
 import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import { useRouter } from 'vue-router'
+import { useFeedbackStore, type FeedbackData } from './stores/feedback'
 import Sidebar from './components/Sidebar.vue'
+import NotificationContainer from './components/NotificationContainer.vue'
 
 const router = useRouter()
-
-interface FeedbackData {
-  sessionId: string
-  aiResponse: string
-  context: string
-  timestamp: string
-}
+const feedbackStore = useFeedbackStore()
 
 let unlistenFeedbackRequest: (() => void) | null = null
 
@@ -27,30 +23,60 @@ onMounted(async () => {
       console.log('📦 Event payload:', event.payload)
 
       try {
-        // 将窗口置顶到所有应用前面
-        console.log('🔝 Bringing window to front...')
-        try {
-          await invoke('bring_window_to_front')
-          console.log('✅ Window brought to front successfully')
-        } catch (error) {
-          console.error('❌ Failed to bring window to front:', error)
-        }
-
-        // 始终导航到 Feedback 页面（简化逻辑）
-        console.log('🔄 Navigating to Feedback page...')
-        router.push({
-          path: '/feedback',
-          query: {
-            sessionId: event.payload.sessionId,
-            aiResponse: encodeURIComponent(event.payload.aiResponse || ''),
-            context: encodeURIComponent(event.payload.context || ''),
-            timestamp: event.payload.timestamp || new Date().toISOString()
-          }
-        }).then(() => {
-          console.log('✅ Navigation completed')
+        // 播放系统提示音通知用户有新的feedback请求
+        console.log('🔔 Playing notification sound for new feedback request...')
+        invoke('play_notification_sound').then(() => {
+          console.log('✅ Notification sound played successfully')
         }).catch((error) => {
-          console.error('❌ Navigation failed:', error)
+          console.error('❌ Failed to play notification sound:', error)
         })
+
+        // 将窗口置顶到所有应用前面（异步，不阻塞事件处理）
+        console.log('🔝 Bringing window to front...')
+        invoke('bring_window_to_front').then(() => {
+          console.log('✅ Window brought to front successfully')
+        }).catch((error) => {
+          console.error('❌ Failed to bring window to front:', error)
+        })
+
+        // 添加到全局 store - 关键修复：优化并发场景下的切换逻辑
+        console.log('📦 Adding feedback session to global store...')
+        const isOnFeedbackPage = router.currentRoute.value.path === '/feedback'
+        const currentTabCount = feedbackStore.feedbackTabs.length
+        const hasNewTabs = feedbackStore.newFeedbackCount > 0
+
+        console.log('📊 Current state - isOnFeedbackPage:', isOnFeedbackPage, 'tabCount:', currentTabCount, 'hasNewTabs:', hasNewTabs)
+
+        // 优化的自动切换逻辑：
+        // 1. 如果没有其他tab，总是自动切换
+        // 2. 如果有未查看的新tab，不自动切换（让用户先处理当前的）
+        // 3. 如果所有现有tab都已查看，可以自动切换到新的
+        const shouldAutoSwitch = currentTabCount === 0 || !hasNewTabs
+
+        feedbackStore.addFeedbackSession(event.payload, {
+          autoSwitch: shouldAutoSwitch
+        })
+
+        // 确保 tab 内容可见性
+        setTimeout(() => {
+          feedbackStore.ensureActiveTabVisible()
+        }, 200)
+
+        // 导航到 Feedback 页面（如果不在该页面）
+        if (!isOnFeedbackPage) {
+          console.log('🔄 Navigating to Feedback page...')
+          router.push('/feedback').then(() => {
+            console.log('✅ Navigation completed')
+            // 导航完成后，确保 tab 状态正确
+            setTimeout(() => {
+              feedbackStore.ensureActiveTabVisible()
+            }, 200)
+          }).catch((error) => {
+            console.error('❌ Navigation failed:', error)
+          })
+        } else {
+          console.log('✅ Already on Feedback page, session added to store')
+        }
       } catch (error) {
         console.error('❌ Error handling feedback-request event:', error)
       }
@@ -80,6 +106,9 @@ onUnmounted(() => {
     <main class="main-content">
       <router-view />
     </main>
+
+    <!-- 通知容器 -->
+    <NotificationContainer />
   </div>
 </template>
 

@@ -3,14 +3,24 @@
     <!-- 左侧：AI 回答 -->
     <div class="ai-response-panel">
       <div class="panel-header">
-        <h3>{{ $t('feedback.aiResponse') }}</h3>
-        <span class="context-info">{{ context }}</span>
+        <div class="header-content">
+          <h3>{{ $t('feedback.aiResponse') }}</h3>
+          <div class="header-meta">
+            <span class="context-info">{{ context }}</span>
+            <span v-if="props.aiSourceDisplay" class="ai-source-info">
+              🤖 {{ props.aiSourceDisplay }}
+            </span>
+          </div>
+        </div>
       </div>
       <div class="ai-response-content">
         <div class="response-text">{{ aiResponse }}</div>
         <div class="response-meta">
           <span class="timestamp">{{ formatTime(timestamp) }}</span>
           <span class="session-id">{{ sessionId.slice(0, 8) }}</span>
+          <span v-if="props.aiSource" class="ai-source-tag" :data-source="props.aiSource">
+            {{ props.aiSource }}
+          </span>
         </div>
       </div>
     </div>
@@ -53,7 +63,7 @@
             <button
               class="send-button"
               @click="sendFeedback"
-              :disabled="!feedbackText.trim() || sending"
+              :disabled="sending"
             >
               <svg v-if="!sending" viewBox="0 0 20 20" fill="currentColor">
                 <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.429a1 1 0 001.169-1.409l-7-14z" />
@@ -95,6 +105,8 @@ interface Props {
   context: string
   sessionId: string
   timestamp: string
+  aiSource?: string
+  aiSourceDisplay?: string
 }
 
 interface Emits {
@@ -104,13 +116,15 @@ interface Emits {
 
 const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
-// const { t } = useI18n() // 暂时注释掉未使用的 i18n
 
 const feedbackInput = ref<HTMLTextAreaElement>()
 const feedbackText = ref('')
 const sending = ref(false)
 const submitted = ref(false)
 const feedbackHistory = ref<Array<{ content: string; timestamp: string }>>([])
+
+// 标记会话是否已结束（提交或取消），防止重复操作
+const sessionEnded = ref(false)
 
 function formatTime(timestamp: string) {
   return new Date(timestamp).toLocaleString()
@@ -123,89 +137,70 @@ function handleKeydown(event: KeyboardEvent) {
   }
 }
 
-async function handleClose() {
-  // 取消反馈会话
-  try {
-    await invoke('cancel_feedback', {
-      sessionId: props.sessionId
-    })
-  } catch (error) {
-    console.error('Failed to cancel feedback session:', error)
-  }
-
-  // 发射关闭事件
-  emit('close')
-}
-
 async function sendFeedback() {
-  if (!feedbackText.value.trim() || sending.value) return
+  if (sending.value || sessionEnded.value) return
 
   sending.value = true
+  sessionEnded.value = true
 
   try {
-    // 调用后端提交反馈
+    const feedbackContent = feedbackText.value.trim() || '(无内容)'
     await invoke('submit_feedback', {
       sessionId: props.sessionId,
-      feedbackContent: feedbackText.value
+      feedbackContent: feedbackContent
     })
 
-    // 添加到历史记录
     feedbackHistory.value.push({
-      content: feedbackText.value,
+      content: feedbackContent,
       timestamp: new Date().toISOString()
     })
 
-    // 发送反馈事件（可选，用于其他组件监听）
     emit('feedback', {
-      content: feedbackText.value,
+      content: feedbackContent,
       sessionId: props.sessionId
     })
 
-    // 标记反馈已提交
-    feedbackSubmitted.value = true
-    submittedSessions.add(props.sessionId)
-
-    // 显示提交成功提示
     submitted.value = true
 
-    // 反馈提交成功后，延迟一下然后关闭 tab
     setTimeout(() => {
       emit('close')
-    }, 2000) // 2 秒后自动关闭
+    }, 1500) // 缩短延迟
 
   } catch (error) {
     console.error('Failed to send feedback:', error)
-    alert('Failed to send feedback. Please try again.')
+    sessionEnded.value = false // 失败时允许重试
   } finally {
     sending.value = false
   }
 }
 
+async function cancelFeedback() {
+  if (sessionEnded.value) return
+  sessionEnded.value = true
+
+  try {
+    await invoke('cancel_feedback', { sessionId: props.sessionId })
+    console.log(`✅ Feedback session cancelled: ${props.sessionId}`)
+  } catch (error) {
+    console.error('Failed to cancel feedback session:', error)
+    // 即便取消失败，也认为会话已尝试结束
+  }
+}
+
+function handleClose() {
+  cancelFeedback()
+  emit('close')
+}
+
 onMounted(() => {
-  // 自动聚焦输入框
   nextTick(() => {
     feedbackInput.value?.focus()
   })
 })
 
-// 标记是否已经提交反馈
-const feedbackSubmitted = ref(false)
-
-// 全局已提交会话集合
-const submittedSessions = new Set<string>()
-
-onUnmounted(async () => {
-  // 只有在没有提交反馈的情况下才取消会话
-  if (!feedbackSubmitted.value && !submittedSessions.has(props.sessionId)) {
-    try {
-      await invoke('cancel_feedback', {
-        sessionId: props.sessionId
-      })
-      console.log('Feedback session cancelled:', props.sessionId)
-    } catch (error) {
-      console.error('Failed to cancel feedback session:', error)
-    }
-  }
+onUnmounted(() => {
+  // 如果会话没有被手动提交或关闭，则在组件卸载时自动取消
+  cancelFeedback()
 })
 </script>
 
@@ -237,6 +232,20 @@ onUnmounted(async () => {
   border-bottom: 1px solid rgba(209, 213, 219, 0.3);
 }
 
+.header-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.header-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
 .panel-header h3 {
   margin: 0;
   font-size: 1rem;
@@ -250,6 +259,34 @@ onUnmounted(async () => {
   background: rgba(102, 126, 234, 0.1);
   padding: 0.25rem 0.5rem;
   border-radius: 0.375rem;
+}
+
+.ai-source-info {
+  font-size: 0.75rem;
+  color: #059669;
+  background: rgba(16, 185, 129, 0.1);
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.375rem;
+  font-weight: 500;
+}
+
+.ai-source-tag {
+  font-size: 0.7rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 0.4rem;
+  font-weight: 600;
+  border: none;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, rgba(118, 75, 162, 0.15) 100%);
+  color: #667eea;
+  box-shadow: 0 1px 3px rgba(102, 126, 234, 0.1);
+  transition: all 0.2s ease;
+}
+
+.ai-source-tag:hover {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.2) 0%, rgba(118, 75, 162, 0.2) 100%);
+  color: #5a67d8;
+  box-shadow: 0 2px 4px rgba(102, 126, 234, 0.15);
+  transform: translateY(-1px);
 }
 
 .close-button {
@@ -489,6 +526,23 @@ onUnmounted(async () => {
     background: rgba(129, 140, 248, 0.2);
   }
 
+  .ai-source-info {
+    color: #6ee7b7;
+    background: rgba(16, 185, 129, 0.2);
+  }
+
+  .ai-source-tag {
+    background: linear-gradient(135deg, rgba(129, 140, 248, 0.2) 0%, rgba(168, 85, 247, 0.2) 100%);
+    color: #a5b4fc;
+    box-shadow: 0 1px 3px rgba(129, 140, 248, 0.15);
+  }
+
+  .ai-source-tag:hover {
+    background: linear-gradient(135deg, rgba(129, 140, 248, 0.25) 0%, rgba(168, 85, 247, 0.25) 100%);
+    color: #c7d2fe;
+    box-shadow: 0 2px 4px rgba(129, 140, 248, 0.2);
+  }
+
   .close-button {
     color: #94a3b8;
   }
@@ -553,6 +607,18 @@ onUnmounted(async () => {
 :global(.dark) .context-info {
   color: #cbd5e0;
   background: rgba(129, 140, 248, 0.2);
+}
+
+:global(.dark) .ai-source-tag {
+  background: linear-gradient(135deg, rgba(129, 140, 248, 0.2) 0%, rgba(168, 85, 247, 0.2) 100%);
+  color: #a5b4fc;
+  box-shadow: 0 1px 3px rgba(129, 140, 248, 0.15);
+}
+
+:global(.dark) .ai-source-tag:hover {
+  background: linear-gradient(135deg, rgba(129, 140, 248, 0.25) 0%, rgba(168, 85, 247, 0.25) 100%);
+  color: #c7d2fe;
+  box-shadow: 0 2px 4px rgba(129, 140, 248, 0.2);
 }
 
 :global(.dark) .close-button {

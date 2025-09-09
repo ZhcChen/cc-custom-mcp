@@ -81,6 +81,12 @@
             <button @click="copyAugmentConfig" class="btn btn-outline btn-sm">
               {{ copiedAugment ? $t('dashboard.configuration.copied') : '📋 ' + $t('dashboard.configuration.augmentConfig') }}
             </button>
+            <button @click="copyClaudeConfig" class="btn btn-outline btn-sm">
+              {{ copiedClaude ? $t('dashboard.configuration.copied') : '📋 Claude Desktop' }}
+            </button>
+            <button @click="copyChatGptConfig" class="btn btn-outline btn-sm">
+              {{ copiedChatGpt ? $t('dashboard.configuration.copied') : '📋 ChatGPT' }}
+            </button>
           </div>
         </div>
         <div class="card-content">
@@ -96,6 +102,24 @@
               :class="['config-tab', { active: activeConfigTab === 'augment' }]"
             >
               {{ $t('dashboard.configuration.augmentTab') }}
+            </button>
+            <button
+              @click="activeConfigTab = 'claude'"
+              :class="['config-tab', { active: activeConfigTab === 'claude' }]"
+            >
+              Claude Desktop
+            </button>
+            <button
+              @click="activeConfigTab = 'chatgpt'"
+              :class="['config-tab', { active: activeConfigTab === 'chatgpt' }]"
+            >
+              ChatGPT
+            </button>
+            <button
+              @click="activeConfigTab = 'custom'"
+              :class="['config-tab', { active: activeConfigTab === 'custom' }]"
+            >
+              自定义
             </button>
           </div>
 
@@ -134,6 +158,73 @@
               </ol>
             </div>
           </div>
+
+          <div v-if="activeConfigTab === 'claude'" class="config-content">
+            <p class="config-description">
+              为 Claude Desktop 配置 MCP 服务器，自动标记来源为 "claude-desktop"。
+            </p>
+            <div class="config-container">
+              <pre class="config-text">{{ claudeConfig }}</pre>
+            </div>
+            <div class="config-help">
+              <h4>使用方法</h4>
+              <ol>
+                <li>复制上面的配置</li>
+                <li>在 Claude Desktop 中添加 MCP 服务器配置</li>
+                <li>重启 Claude Desktop</li>
+                <li>现在 feedback 将显示来源为 "Claude Desktop"</li>
+              </ol>
+            </div>
+          </div>
+
+          <div v-if="activeConfigTab === 'chatgpt'" class="config-content">
+            <p class="config-description">
+              为 ChatGPT 配置 MCP 服务器，自动标记来源为 "chatgpt"。
+            </p>
+            <div class="config-container">
+              <pre class="config-text">{{ chatGptConfig }}</pre>
+            </div>
+            <div class="config-help">
+              <h4>使用方法</h4>
+              <ol>
+                <li>复制上面的配置</li>
+                <li>在 ChatGPT 中添加 MCP 服务器配置</li>
+                <li>重启 ChatGPT</li>
+                <li>现在 feedback 将显示来源为 "ChatGPT"</li>
+              </ol>
+            </div>
+          </div>
+
+          <div v-if="activeConfigTab === 'custom'" class="config-content">
+            <p class="config-description">
+              为自定义 AI 工具配置 MCP 服务器，可以自定义来源名称。
+            </p>
+            <div class="custom-source-input">
+              <label>来源名称：</label>
+              <input 
+                v-model="customSourceName" 
+                type="text" 
+                placeholder="输入 AI 工具名称"
+                @input="generateCustomConfig"
+                class="custom-input"
+              />
+              <button @click="copyCustomConfig" class="btn btn-outline btn-sm">
+                {{ copiedCustom ? '已复制' : '📋 复制配置' }}
+              </button>
+            </div>
+            <div class="config-container" v-if="customConfig">
+              <pre class="config-text">{{ customConfig }}</pre>
+            </div>
+            <div class="config-help">
+              <h4>使用方法</h4>
+              <ol>
+                <li>输入你的 AI 工具名称</li>
+                <li>复制生成的配置</li>
+                <li>在你的 AI 工具中添加 MCP 服务器配置</li>
+                <li>现在 feedback 将显示你的自定义来源名称</li>
+              </ol>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -158,9 +249,16 @@ const tools = ref<McpTool[]>([])
 const mcpConfig = ref<string>('')
 const cursorConfig = ref<string>('')
 const augmentConfig = ref<string>('')
+const claudeConfig = ref<string>('')
+const chatGptConfig = ref<string>('')
+const customConfig = ref<string>('')
+const customSourceName = ref<string>('')
 const loading = ref<boolean>(false)
 const copiedCursor = ref<boolean>(false)
 const copiedAugment = ref<boolean>(false)
+const copiedClaude = ref<boolean>(false)
+const copiedChatGpt = ref<boolean>(false)
+const copiedCustom = ref<boolean>(false)
 const activeConfigTab = ref<string>('cursor')
 
 async function startServer() {
@@ -236,7 +334,37 @@ async function loadAugmentConfig() {
   }
 }
 
+async function loadClaudeConfig() {
+  try {
+    const config = await invoke<string>('get_claude_desktop_config')
+    claudeConfig.value = config
+  } catch (error) {
+    console.error('Failed to load claude config:', error)
+  }
+}
 
+async function loadChatGptConfig() {
+  try {
+    const config = await invoke<string>('get_chatgpt_config')
+    chatGptConfig.value = config
+  } catch (error) {
+    console.error('Failed to load chatgpt config:', error)
+  }
+}
+
+async function generateCustomConfig() {
+  if (!customSourceName.value.trim()) {
+    customConfig.value = ''
+    return
+  }
+  
+  try {
+    const config = await invoke<string>('get_custom_config', { sourceName: customSourceName.value })
+    customConfig.value = config
+  } catch (error) {
+    console.error('Failed to generate custom config:', error)
+  }
+}
 
 function copyCursorConfig() {
   navigator.clipboard.writeText(cursorConfig.value)
@@ -251,6 +379,33 @@ function copyAugmentConfig() {
   copiedAugment.value = true
   setTimeout(() => {
     copiedAugment.value = false
+  }, 2000)
+}
+
+function copyClaudeConfig() {
+  navigator.clipboard.writeText(claudeConfig.value)
+  copiedClaude.value = true
+  setTimeout(() => {
+    copiedClaude.value = false
+  }, 2000)
+}
+
+function copyChatGptConfig() {
+  navigator.clipboard.writeText(chatGptConfig.value)
+  copiedChatGpt.value = true
+  setTimeout(() => {
+    copiedChatGpt.value = false
+  }, 2000)
+}
+
+function copyCustomConfig() {
+  if (!customConfig.value) {
+    return
+  }
+  navigator.clipboard.writeText(customConfig.value)
+  copiedCustom.value = true
+  setTimeout(() => {
+    copiedCustom.value = false
   }, 2000)
 }
 
@@ -274,6 +429,8 @@ onMounted(async () => {
   await loadConfig()
   await loadCursorConfig()
   await loadAugmentConfig()
+  await loadClaudeConfig()
+  await loadChatGptConfig()
 
   // 自动启动服务器
   if (serverStatus.value === 'stopped') {
@@ -413,6 +570,42 @@ onMounted(async () => {
   margin-bottom: 0.25rem;
 }
 
+/* 自定义配置输入框样式 */
+.custom-source-input {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  background: rgba(102, 126, 234, 0.05);
+  border-radius: 0.5rem;
+  border: 1px solid rgba(102, 126, 234, 0.2);
+}
+
+.custom-source-input label {
+  color: #4a5568;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.custom-input {
+  flex: 1;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid rgba(226, 232, 240, 0.5);
+  border-radius: 0.375rem;
+  background: rgba(255, 255, 255, 0.8);
+  color: #4a5568;
+  font-size: 0.875rem;
+  transition: all 0.3s ease;
+}
+
+.custom-input:focus {
+  outline: none;
+  border-color: #667eea;
+  background: rgba(255, 255, 255, 1);
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
 @media (prefers-color-scheme: dark) {
   .config-tab {
     color: #a0aec0;
@@ -441,23 +634,26 @@ onMounted(async () => {
   .config-help ol {
     color: #a0aec0;
   }
-}
 
-/* 测试按钮样式 */
-.btn-test {
-  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-  color: white;
-  border: none;
-  padding: 0.75rem 1.5rem;
-  border-radius: 0.5rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.3s ease;
-}
+  .custom-source-input {
+    background: rgba(144, 205, 244, 0.1);
+    border-color: rgba(144, 205, 244, 0.3);
+  }
 
-.btn-test:hover {
-  background: linear-gradient(135deg, #d97706 0%, #b45309 100%);
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+  .custom-source-input label {
+    color: #e2e8f0;
+  }
+
+  .custom-input {
+    background: rgba(45, 55, 72, 0.8);
+    border-color: rgba(113, 128, 150, 0.5);
+    color: #e2e8f0;
+  }
+
+  .custom-input:focus {
+    background: rgba(45, 55, 72, 1);
+    border-color: #90cdf4;
+    box-shadow: 0 0 0 3px rgba(144, 205, 244, 0.1);
+  }
 }
 </style>

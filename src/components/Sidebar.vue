@@ -34,16 +34,26 @@
           >
             <span class="nav-icon">💬</span>
             <span class="nav-text">{{ $t('nav.feedback') }}</span>
+            <span v-if="pendingFeedbackCount > 0" class="feedback-badge">
+              {{ pendingFeedbackCount }}
+            </span>
           </router-link>
         </li>
+
       </ul>
     </nav>
   </aside>
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
+import { useFeedbackStore } from '../stores/feedback'
+
 // 简化的侧边栏组件，不再显示服务器状态
 // 服务器状态统一在仪表盘中管理和显示
+
+const feedbackStore = useFeedbackStore()
+const pendingFeedbackCount = computed(() => feedbackStore.pendingFeedbackCount)
 </script>
 
 <style scoped>
@@ -106,6 +116,22 @@
   text-decoration: none;
   position: relative;
   overflow: hidden;
+}
+
+.feedback-badge {
+  margin-left: auto;
+  background: #ef4444;
+  color: white;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.25rem 0.5rem;
+  border-radius: 9999px;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: pulse 2s infinite;
 }
 
 .nav-button:hover {
@@ -220,5 +246,14 @@
   color: #a5b4fc;
   border-right: 3px solid #818cf8;
   box-shadow: inset 0 0 20px rgba(129, 140, 248, 0.1);
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
 }
 </style>

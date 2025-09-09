@@ -1,20 +1,16 @@
 <template>
   <div class="feedback-page">
-    <div class="page-header">
-      <h2>{{ $t('feedback.title') }}</h2>
-      <p class="page-subtitle">{{ $t('feedback.subtitle') }}</p>
-    </div>
-
     <div class="feedback-container">
       <TabContainer
-        v-model:active-tab-id="activeTabId"
-        :tabs="feedbackTabs"
+        :active-tab-id="feedbackStore.activeTabId"
+        :tabs="feedbackStore.feedbackTabs"
         @close-tab="closeFeedbackTab"
         @tab-changed="onTabChanged"
+        @update:active-tab-id="onTabChanged"
       />
-      
-      <!-- 空状态 -->
-      <div v-if="feedbackTabs.length === 0" class="empty-state">
+
+      <!-- 空状态 - 修复：使用 computed 属性确保反应式更新 -->
+      <div v-if="!feedbackStore.hasActiveFeedback" class="empty-state">
         <div class="empty-icon">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-3.582 8-8 8a8.959 8.959 0 01-4.906-1.681L3 21l2.681-5.094A8.959 8.959 0 013 12c0-4.418 3.582-8 8-8s8 3.582 8 8z" />
@@ -22,127 +18,51 @@
         </div>
         <h3>{{ $t('feedback.empty.title') }}</h3>
         <p>{{ $t('feedback.empty.description') }}</p>
+        
+
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
-import { listen } from '@tauri-apps/api/event'
-import { invoke } from '@tauri-apps/api/core'
+import { onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useFeedbackStore, type FeedbackData } from '../stores/feedback'
 import TabContainer from '../components/TabContainer.vue'
-import FeedbackSession from '../components/FeedbackSession.vue'
 
-// const { t } = useI18n() // 暂时注释掉未使用的 i18n
-// const route = useRoute() // 暂时注释掉未使用的 route
 const router = useRouter()
+const feedbackStore = useFeedbackStore()
 
-interface FeedbackData {
-  sessionId: string
-  aiResponse: string
-  context: string
-  timestamp: string
-}
-
-const feedbackTabs = ref<Array<{
-  id: string
-  title: string
-  component: any
-  props: any
-}>>([])
-
-const activeTabId = ref('')
-let unlistenFeedbackRequest: (() => void) | null = null
-
-// 监听来自 MCP 服务器的反馈请求
-async function handleFeedbackRequest(data: FeedbackData) {
-  console.log('🎯 Feedback request received:', data)
-
-  const { sessionId, aiResponse, context, timestamp } = data
-
-  console.log('📝 Creating new feedback tab:', {
-    sessionId,
-    context,
-    aiResponseLength: aiResponse?.length || 0,
-    timestamp
-  })
-
-  // 将窗口置顶到所有应用前面
-  console.log('🔝 Bringing window to front...')
-  try {
-    await invoke('bring_window_to_front')
-    console.log('✅ Window brought to front successfully')
-  } catch (error) {
-    console.error('❌ Failed to bring window to front:', error)
-  }
-
-  // 创建新的 tab
-  const newTab = {
-    id: sessionId,
-    title: context || `Feedback ${feedbackTabs.value.length + 1}`,
-    component: FeedbackSession,
-    props: {
-      sessionId,
-      aiResponse,
-      context,
-      timestamp
-    },
-    events: {
-      feedback: handleFeedbackSubmit
-    }
-  }
-
-  feedbackTabs.value.push(newTab)
-  activeTabId.value = sessionId
-
-  console.log('✅ Tab created and activated:', {
-    tabId: sessionId,
-    totalTabs: feedbackTabs.value.length,
-    activeTabId: activeTabId.value
-  })
-
-  // 播放系统提示音
-  console.log('🔊 Playing notification sound...')
-  try {
-    await invoke('play_notification_sound')
-    console.log('✅ Notification sound played successfully')
-  } catch (error) {
-    console.error('❌ Failed to play notification sound:', error)
-  }
+// 处理来自 URL 参数的反馈请求
+function handleFeedbackRequest(data: FeedbackData) {
+  console.log('🎯 Feedback request received in Feedback page:', data)
+  feedbackStore.addFeedbackSession(data)
 }
 
 function closeFeedbackTab(tabId: string) {
-  const index = feedbackTabs.value.findIndex(tab => tab.id === tabId)
-  if (index !== -1) {
-    feedbackTabs.value.splice(index, 1)
-    
-    // 如果关闭的是当前活动的 tab，切换到其他 tab
-    if (activeTabId.value === tabId) {
-      if (feedbackTabs.value.length > 0) {
-        // 优先选择下一个 tab，如果没有则选择上一个
-        const nextIndex = index < feedbackTabs.value.length ? index : index - 1
-        activeTabId.value = feedbackTabs.value[nextIndex].id
-      } else {
-        activeTabId.value = ''
-      }
-    }
-  }
+  feedbackStore.removeFeedbackSession(tabId)
 }
 
 function onTabChanged(tabId: string) {
-  console.log('Tab changed to:', tabId)
+  console.log('🔄 Feedback page onTabChanged:', tabId)
+  console.log('📊 Before change - activeTabId:', feedbackStore.activeTabId)
+  console.log('📊 Available tabs:', feedbackStore.feedbackTabs.map(t => ({ id: t.id, title: t.title })))
+
+  feedbackStore.setActiveTab(tabId)
+
+  // 验证更改是否生效
+  setTimeout(() => {
+    console.log('📊 After change - activeTabId:', feedbackStore.activeTabId)
+    console.log('📊 Current tab:', feedbackStore.currentTab?.id)
+  }, 100)
 }
 
-function handleFeedbackSubmit(data: { content: string; sessionId: string }) {
-  console.log('Feedback submitted:', data)
-  
-  // 这里可以将反馈发送回 AI 或保存到本地
-  // 暂时只是记录日志
-}
 
-onMounted(async () => {
+
+
+
+onMounted(() => {
   console.log('🚀 Feedback page mounting...')
 
   // 检查是否有 URL 参数传递的反馈数据
@@ -153,37 +73,22 @@ onMounted(async () => {
       sessionId: route.query.sessionId as string,
       aiResponse: decodeURIComponent(route.query.aiResponse as string || ''),
       context: decodeURIComponent(route.query.context as string || ''),
-      timestamp: route.query.timestamp as string || new Date().toISOString()
+      timestamp: route.query.timestamp as string || new Date().toISOString(),
+      aiSource: route.query.aiSource as string,
+      aiSourceDisplay: decodeURIComponent(route.query.aiSourceDisplay as string || '')
     }
 
     console.log('📝 Processing feedback data from URL:', feedbackData)
-    await handleFeedbackRequest(feedbackData)
+    handleFeedbackRequest(feedbackData)
 
     // 清理 URL 参数
     router.replace('/feedback')
   }
 
-  try {
-    // 监听来自 Tauri 后端的反馈请求事件
-    unlistenFeedbackRequest = await listen<FeedbackData>('feedback-request', async (event) => {
-      console.log('📡 Received feedback-request event:', event)
-      await handleFeedbackRequest(event.payload)
-    })
-
-    console.log('✅ Feedback page mounted, listening for feedback requests')
-    console.log('🎧 Event listener setup complete')
-  } catch (error) {
-    console.error('❌ Failed to setup feedback event listeners:', error)
-  }
+  console.log('✅ Feedback page mounted')
 })
 
-onUnmounted(() => {
-  // 清理事件监听器
-  if (unlistenFeedbackRequest) {
-    unlistenFeedbackRequest()
-    unlistenFeedbackRequest = null
-  }
-})
+
 </script>
 
 <style scoped>
@@ -195,32 +100,12 @@ onUnmounted(() => {
   gap: 1.5rem;
 }
 
-.page-header {
-  text-align: center;
-}
-
-.page-header h2 {
-  margin: 0 0 0.5rem 0;
-  font-size: 2rem;
-  font-weight: 700;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-.page-subtitle {
-  margin: 0;
-  font-size: 1rem;
-  color: #6b7280;
-  font-weight: 400;
-}
-
 .feedback-container {
   flex: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;
+  gap: 1rem;
 }
 
 .empty-state {
@@ -260,6 +145,8 @@ onUnmounted(() => {
   line-height: 1.5;
 }
 
+
+
 /* 深色模式 */
 @media (prefers-color-scheme: dark) {
   .page-subtitle {
@@ -293,5 +180,16 @@ onUnmounted(() => {
 
 :global(.dark) .empty-state h3 {
   color: #f3f4f6;
+}
+
+
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
 }
 </style>
