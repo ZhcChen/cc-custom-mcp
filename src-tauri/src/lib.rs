@@ -1,3 +1,5 @@
+#![allow(unexpected_cfgs)]
+
 mod mcp_server;
 mod system_sound;
 
@@ -44,52 +46,155 @@ fn get_feedback_response_path(session_id: &str) -> PathBuf {
 
 // --- 文件监听器 ---
 
-fn start_file_watcher(app: AppHandle, stop_signal: Arc<AtomicBool>) {
-    thread::spawn(move || {
-        let requests_dir = get_feedback_request_path("").parent().unwrap().to_path_buf();
-
-        loop {
-            if stop_signal.load(Ordering::Relaxed) {
-                break;
-            }
-
-            thread::sleep(Duration::from_millis(500));
-
-            if let Ok(entries) = fs::read_dir(&requests_dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.extension().and_then(|s| s.to_str()) == Some("json") {
-                        if let Ok(content) = fs::read_to_string(&path) {
-                            if let Ok(mut request_data) = serde_json::from_str::<Value>(&content) {
-                                if request_data.get("processed").and_then(|v| v.as_bool()).unwrap_or(false) {
-                                    continue;
-                                }
-
-                                let feedback_data = json!({
-                                    "sessionId": request_data["sessionId"],
-                                    "aiResponse": request_data["aiResponse"],
-                                    "context": request_data["context"],
-                                    "timestamp": request_data["timestamp"],
-                                    "aiSource": request_data.get("aiSource").and_then(|v| v.as_str()).unwrap_or("unknown"),
-                                    "aiSourceDisplay": request_data.get("aiSourceDisplay").and_then(|v| v.as_str()).unwrap_or("Unknown AI Tool")
-                                });
-
-                                if app.emit("feedback-request", &feedback_data).is_ok() {
-                                    thread::spawn(|| {
-                                        if let Ok(rt) = tokio::runtime::Runtime::new() {
-                                            rt.block_on(async {
-                                                let _ = play_notification_sound_async().await;
-                                            });
-                                        }
-                                    });
-
-                                    request_data["processed"] = json!(true);
-                                    request_data["processed_at"] = json!(chrono::Utc::now().to_rfc3339());
-                                    let _ = fs::write(&path, serde_json::to_string_pretty(&request_data).unwrap());
+// 处理单个 feedback 请求文件的通用函数
+fn process_feedback_request_file(app: &AppHandle, path: &std::path::Path, is_startup_scan: bool) -> bool {
+    match fs::read_to_string(path) {
+        Ok(content) => {
+            match serde_json::from_str::<Value>(&content) {
+                Ok(mut request_data) => {
+                    // 检查是否已经被用户处理（提交了反馈）
+                    if request_data.get("processed").and_then(|v| v.as_bool()).unwrap_or(false) {
+                        return false; // 跳过已处理的文件
+                    }
+                    
+                    let session_id = request_data["sessionId"].as_str().unwrap_or("unknown");
+                    
+                    // 简化逻辑：使用时间戳来避免重复处理
+                    let now = chrono::Utc::now().to_rfc3339();
+                    let last_processed_time = request_data.get("last_processed_at").and_then(|v| v.as_str());
+                    
+                    // 对于启动扫描，总是处理
+                    // 对于文件监听，检查是否在最近5分钟内处理过
+                    let should_process = if is_startup_scan {
+                        eprintln!("🔄 Loading pending feedback request on startup: {}", session_id);
+                        true
+                    } else {
+                        // 检查上次处理时间，如果在5分钟内，跳过
+                        if let Some(last_time) = last_processed_time {
+                            if let Ok(last_datetime) = chrono::DateTime::parse_from_rfc3339(last_time) {
+                                let elapsed = chrono::Utc::now().signed_duration_since(last_datetime.with_timezone(&chrono::Utc));
+                                if elapsed.num_minutes() < 5 {
+                                    return false; // 跳过最近处理过的文件
                                 }
                             }
                         }
+                        eprintln!("🔄 Processing new feedback request: {}", session_id);
+                        true
+                    };
+
+                    if !should_process {
+                        return false;
                     }
+
+                    let feedback_data = json!({
+                        "sessionId": request_data["sessionId"],
+                        "aiResponse": request_data["aiResponse"],
+                        "context": request_data["context"],
+                        "timestamp": request_data["timestamp"],
+                        "aiSource": request_data.get("aiSource").and_then(|v| v.as_str()).unwrap_or("unknown"),
+                        "aiSourceDisplay": request_data.get("aiSourceDisplay").and_then(|v| v.as_str()).unwrap_or("Unknown AI Tool")
+                    });
+
+                    if app.emit("feedback-request", &feedback_data).is_ok() {
+                        // 只在非启动扫描时播放通知声音
+                        if !is_startup_scan {
+                            thread::spawn(|| {
+                                if let Ok(rt) = tokio::runtime::Runtime::new() {
+                                    rt.block_on(async {
+                                        if let Err(e) = play_notification_sound_async().await {
+                                            eprintln!("🔔 Failed to play notification sound: {}", e);
+                                        }
+                                    });
+                                }
+                            });
+                        }
+
+                        // 更新处理时间，但不标记为已完成处理
+                        request_data["last_processed_at"] = json!(now);
+                        if let Err(e) = fs::write(path, serde_json::to_string_pretty(&request_data).unwrap()) {
+                            eprintln!("❌ Failed to update processed time: {}", e);
+                        }
+                        return true;
+                    } else {
+                        eprintln!("❌ Failed to emit feedback-request event for {:?}", path);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("❌ Failed to parse JSON from {:?}: {}", path, e);
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("❌ Failed to read file {:?}: {}", path, e);
+        }
+    }
+    false
+}
+
+// 执行初始扫描，加载所有 pending 的 feedback 请求
+fn perform_initial_scan(app: &AppHandle) {
+    let requests_dir = get_feedback_request_path("").parent().unwrap().to_path_buf();
+    
+    // 确保目录存在
+    if !requests_dir.exists() {
+        eprintln!("📁 Requests directory does not exist, skipping initial scan");
+        return;
+    }
+
+    eprintln!("🔍 Performing initial scan for pending feedback requests in: {:?}", requests_dir);
+    
+    let mut loaded_count = 0;
+    match fs::read_dir(&requests_dir) {
+        Ok(entries) => {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|s| s.to_str()) == Some("json") {
+                    if process_feedback_request_file(app, &path, true) {
+                        loaded_count += 1;
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("❌ Failed to read requests directory during initial scan: {}", e);
+            return;
+        }
+    }
+    
+    if loaded_count > 0 {
+        eprintln!("✅ Initial scan completed: loaded {} pending feedback requests", loaded_count);
+    } else {
+        eprintln!("📭 Initial scan completed: no pending feedback requests found");
+    }
+}
+
+fn start_file_watcher(app: AppHandle, stop_signal: Arc<AtomicBool>) {
+    thread::spawn(move || {
+        let requests_dir = get_feedback_request_path("").parent().unwrap().to_path_buf();
+        eprintln!("🔍 File watcher started, monitoring directory: {:?}", requests_dir);
+
+        // 启动时执行初始扫描
+        perform_initial_scan(&app);
+
+        loop {
+            if stop_signal.load(Ordering::Relaxed) {
+                eprintln!("🛑 File watcher stopping due to stop signal");
+                break;
+            }
+
+            thread::sleep(Duration::from_millis(1000)); // 增加间隔以减少CPU使用
+
+            match fs::read_dir(&requests_dir) {
+                Ok(entries) => {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.extension().and_then(|s| s.to_str()) == Some("json") {
+                            process_feedback_request_file(&app, &path, false);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("❌ Failed to read requests directory {:?}: {}", requests_dir, e);
                 }
             }
         }
@@ -152,6 +257,33 @@ async fn submit_feedback(session_id: String, feedback_content: String) -> Result
     fs::write(&response_path, serde_json::to_string_pretty(&response_data).unwrap())
         .map_err(|e| e.to_string())?;
     
+    // 标记原始请求文件为已处理
+    let request_path = get_feedback_request_path(&session_id);
+    if request_path.exists() {
+        match fs::read_to_string(&request_path) {
+            Ok(content) => {
+                match serde_json::from_str::<Value>(&content) {
+                    Ok(mut request_data) => {
+                        request_data["processed"] = json!(true);
+                        request_data["processed_at"] = json!(chrono::Utc::now().to_rfc3339());
+                        request_data["feedback_submitted"] = json!(true);
+                        if let Err(e) = fs::write(&request_path, serde_json::to_string_pretty(&request_data).unwrap()) {
+                            eprintln!("❌ Failed to mark request as processed: {}", e);
+                        } else {
+                            eprintln!("✅ Marked feedback request as processed: {}", session_id);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("❌ Failed to parse request file for processing: {}", e);
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("❌ Failed to read request file for processing: {}", e);
+            }
+        }
+    }
+    
     Ok(())
 }
 
@@ -167,29 +299,16 @@ async fn cancel_feedback(session_id: String) -> Result<(), String> {
 
 #[tauri::command]
 fn get_mcp_config() -> String {
-    get_mcp_config_for_env("production")
-}
-
-#[tauri::command]
-fn get_mcp_config_dev() -> String {
-    get_mcp_config_for_env("development")
-}
-
-fn get_mcp_config_for_env(env: &str) -> String {
-    let _is_dev = env == "development";
-
-    // 修复：无论开发还是生产环境，current_exe() 都能正确获取路径
-    // 移除了之前错误的开发环境路径拼接逻辑
     let exe_path = std::env::current_exe()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|_| "!!! FAILED TO GET EXECUTABLE PATH !!!".to_string());
 
+    // 通用配置不包含autoApprove，因为这是Cursor独有的功能
     let config = json!({
         "mcpServers": {
             "cc-mcp": {
                 "command": exe_path,
-                "args": ["--mcp-mode"],
-                "autoApprove": ["file_read", "system_info", "feedback"]
+                "args": ["--mcp-mode"]
             }
         }
     });
@@ -210,6 +329,46 @@ async fn bring_window_to_front(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 async fn play_notification_sound() -> Result<(), String> {
     play_notification_sound_async().await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn scan_pending_feedback(app: AppHandle) -> Result<String, String> {
+    let requests_dir = get_feedback_request_path("").parent().unwrap().to_path_buf();
+    
+    // 确保目录存在
+    if !requests_dir.exists() {
+        return Ok("No pending feedback requests found (directory does not exist)".to_string());
+    }
+
+    eprintln!("🔍 Manual scan for pending feedback requests triggered");
+    
+    let mut loaded_count = 0;
+    match fs::read_dir(&requests_dir) {
+        Ok(entries) => {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|s| s.to_str()) == Some("json") {
+                    if process_feedback_request_file(&app, &path, true) {
+                        loaded_count += 1;
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            let error_msg = format!("Failed to scan pending feedback requests: {}", e);
+            eprintln!("❌ {}", error_msg);
+            return Err(error_msg);
+        }
+    }
+    
+    let result_msg = if loaded_count > 0 {
+        format!("Successfully loaded {} pending feedback requests", loaded_count)
+    } else {
+        "No pending feedback requests found".to_string()
+    };
+    
+    eprintln!("✅ Manual scan completed: {}", result_msg);
+    Ok(result_msg)
 }
 
 #[tauri::command]
@@ -242,16 +401,23 @@ fn get_config_for_source(source: &str) -> String {
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|_| "!!! FAILED TO GET EXECUTABLE PATH !!!".to_string());
 
+    // autoApprove 是 Cursor 独有的功能，其他 AI 不支持
+    let mut server_config = json!({
+        "command": exe_path,
+        "args": ["--mcp-mode"],
+        "env": {
+            "MCP_SOURCE": source
+        }
+    });
+
+    // 只有 Cursor 才添加 autoApprove 配置
+    if source == "cursor" {
+        server_config["autoApprove"] = json!(["file_read", "system_info", "feedback"]);
+    }
+
     let config = json!({
         "mcpServers": {
-            "cc-mcp": {
-                "command": exe_path,
-                "args": ["--mcp-mode"],
-                "env": {
-                    "MCP_SOURCE": source
-                },
-                "autoApprove": ["file_read", "system_info", "feedback"]
-            }
+            "cc-mcp": server_config
         }
     });
     serde_json::to_string_pretty(&config).unwrap_or_default()
@@ -260,26 +426,9 @@ fn get_config_for_source(source: &str) -> String {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     if std::env::args().any(|arg| arg == "--mcp-mode") {
-        // 优先使用环境变量，如果没有设置则根据构建模式自动判断
-        let is_dev_mode = match std::env::var("MCP_DEV_MODE") {
-            Ok(val) => val == "true",
-            Err(_) => {
-                // 如果没有设置环境变量，在 debug 构建时默认为开发模式
-                #[cfg(debug_assertions)]
-                {
-                    true
-                }
-                #[cfg(not(debug_assertions))]
-                {
-                    false
-                }
-            }
-        };
-        
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
-            let mut server = LocalMcpServer::new();
-            server.set_dev_mode(is_dev_mode);
+            let server = LocalMcpServer::new();
             if let Err(e) = server.start_stdio_server().await {
                 eprintln!("MCP Server failed to start: {}", e);
                 std::process::exit(1);
@@ -304,7 +453,6 @@ pub fn run() {
             get_server_status,
             list_available_tools,
             get_mcp_config,
-            get_mcp_config_dev,
             get_cursor_config,
             get_augment_config,
             get_claude_desktop_config,
@@ -313,7 +461,8 @@ pub fn run() {
             submit_feedback,
             cancel_feedback,
             bring_window_to_front,
-            play_notification_sound
+            play_notification_sound,
+            scan_pending_feedback
         ])
         .setup(|app| {
             let state: State<AppState> = app.state();

@@ -36,11 +36,7 @@ export const useFeedbackStore = defineStore('feedback', () => {
 
   const hasActiveFeedback = computed(() => {
     // 检查是否有活跃的（未提交且未取消的）反馈会话
-    return feedbackTabs.value.some(() => {
-      // 如果 tab 的 props 中有状态信息，检查状态
-      // 这里我们简单检查 tab 是否存在，因为已完成的 tab 会被自动移除
-      return true
-    })
+    return feedbackTabs.value.length > 0
   })
 
   const pendingFeedbackCount = computed(() => {
@@ -107,26 +103,16 @@ export const useFeedbackStore = defineStore('feedback', () => {
       aiSourceDisplay: data.aiSourceDisplay // 添加AI来源显示名称到tab
     }
 
-    // 优化的并发切换逻辑：
+    // 简化的自动切换逻辑：
     // 1. 如果是第一个 tab，总是切换
     // 2. 如果当前没有活动 tab，切换到新 tab
     // 3. 如果明确要求自动切换，切换到新 tab
-    // 4. 对于并发场景：
-    //    - 如果当前活动 tab 是新的（未查看），不自动切换，让用户先处理当前的
-    //    - 如果当前活动 tab 已查看，可以自动切换
+    // 4. 其他情况不自动切换，让用户手动选择
     const isFirstTab = feedbackTabs.value.length === 0
     const hasNoActiveTab = !activeTabId.value
     const explicitAutoSwitch = options.autoSwitch === true
     
-    // 检查当前活动 tab 的状态
-    const currentActiveTab = feedbackTabs.value.find(tab => tab.id === activeTabId.value)
-    const currentTabIsNew = currentActiveTab?.isNew || false
-    
-    // 智能切换逻辑：在并发场景下更加智能
-    const shouldAutoSwitch = isFirstTab || 
-                            hasNoActiveTab || 
-                            explicitAutoSwitch ||
-                            (!currentTabIsNew && feedbackTabs.value.length < 2) // 当前 tab 已查看且 tab 数量少时自动切换
+    const shouldAutoSwitch = isFirstTab || hasNoActiveTab || explicitAutoSwitch
 
     feedbackTabs.value.push(newTab)
     console.log('➕ New tab added. Total tabs:', feedbackTabs.value.length)
@@ -135,23 +121,16 @@ export const useFeedbackStore = defineStore('feedback', () => {
       console.log('🔄 Auto-switching to new session:', data.sessionId)
       activeTabId.value = data.sessionId
     } else {
-      console.log('📢 New tab added without switching - better UX for concurrent requests')
+      console.log('📢 New tab added without switching - user can manually select')
       // 不自动切换，但添加通知让用户知道有新的feedback
       addNotification(`新的 Feedback 请求: ${data.context || 'Feedback'}`)
-
-      // 确保至少有一个活动tab
-      if (!activeTabId.value) {
-        console.log('🎯 No active tab, forcing activation of new tab:', data.sessionId)
-        activeTabId.value = data.sessionId
-      }
     }
 
     console.log('✅ Feedback session added to store:', {
       sessionId: data.sessionId,
       totalTabs: feedbackTabs.value.length,
       activeTabId: activeTabId.value,
-      autoSwitched: shouldAutoSwitch,
-      currentTabWasNew: currentTabIsNew
+      autoSwitched: shouldAutoSwitch
     })
   }
 
@@ -213,6 +192,56 @@ export const useFeedbackStore = defineStore('feedback', () => {
     console.log('🧹 Clearing all feedback sessions from store')
     feedbackTabs.value = []
     activeTabId.value = ''
+  }
+
+  // 关闭所有 tabs 并取消对应的 feedback 会话
+  async function closeAllSessions() {
+    console.log('🚫 Closing all feedback sessions...')
+    
+    const sessionIds = feedbackTabs.value.map(tab => tab.id)
+    console.log(`📊 Found ${sessionIds.length} sessions to close:`, sessionIds)
+    
+    if (sessionIds.length === 0) {
+      console.log('📭 No sessions to close')
+      return
+    }
+
+    // 尝试取消所有 feedback 会话
+    const cancelPromises = sessionIds.map(async (sessionId) => {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core')
+        await invoke('cancel_feedback', { sessionId })
+        console.log(`✅ Feedback session cancelled: ${sessionId}`)
+        return { sessionId, success: true }
+      } catch (error) {
+        console.error(`❌ Failed to cancel feedback session ${sessionId}:`, error)
+        return { sessionId, success: false, error }
+      }
+    })
+
+    const results = await Promise.allSettled(cancelPromises)
+    
+    // 统计结果
+    const successful = results.filter(result => 
+      result.status === 'fulfilled' && result.value.success
+    ).length
+    const failed = results.length - successful
+    
+    console.log(`📊 Close all sessions result: ${successful} successful, ${failed} failed`)
+    
+    // 清空所有 tabs（无论取消是否成功）
+    feedbackTabs.value = []
+    activeTabId.value = ''
+    
+    console.log('✅ All feedback sessions closed and tabs cleared')
+    
+    // 添加通知
+    if (successful > 0) {
+      addNotification(`已关闭 ${successful} 个反馈会话`)
+    }
+    if (failed > 0) {
+      addNotification(`${failed} 个会话关闭失败，但已从界面移除`)
+    }
   }
 
   // 获取特定会话的信息
@@ -285,7 +314,12 @@ export const useFeedbackStore = defineStore('feedback', () => {
     }
   }
 
-
+  // 检查当前活跃 tab 的输入框是否聚焦
+  function isCurrentTabInputFocused(): boolean {
+    // 这个方法需要在 TabContainer 或 Feedback 页面中实现具体的聚焦检查逻辑
+    // 这里先返回 false 作为默认值，具体实现在 App.vue 中
+    return false
+  }
 
   return {
     // 状态
@@ -305,6 +339,7 @@ export const useFeedbackStore = defineStore('feedback', () => {
     setActiveTab,
     handleFeedbackSubmit,
     clearAllSessions,
+    closeAllSessions,
     getSession,
     hasSession,
     addNotification,
@@ -312,6 +347,7 @@ export const useFeedbackStore = defineStore('feedback', () => {
     clearNotifications,
     markAllAsViewed,
     refreshTabContent,
-    ensureActiveTabVisible
+    ensureActiveTabVisible,
+    isCurrentTabInputFocused
   }
 })

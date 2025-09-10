@@ -261,6 +261,7 @@ const copiedChatGpt = ref<boolean>(false)
 const copiedCustom = ref<boolean>(false)
 const activeConfigTab = ref<string>('cursor')
 
+
 async function startServer() {
   loading.value = true
   try {
@@ -424,6 +425,7 @@ function getToolDescription(toolName: string, originalDescription: string): stri
 
 
 
+
 onMounted(async () => {
   await refreshStatus()
   await loadConfig()
@@ -515,6 +517,7 @@ onMounted(async () => {
   gap: 0.5rem;
   margin-bottom: 1.5rem;
   border-bottom: 1px solid rgba(226, 232, 240, 0.3);
+  padding-bottom: 0.5rem;
 }
 
 .config-tab {
@@ -526,6 +529,7 @@ onMounted(async () => {
   cursor: pointer;
   border-bottom: 2px solid transparent;
   transition: all 0.3s ease;
+  border-radius: 0.375rem 0.375rem 0 0;
 }
 
 .config-tab:hover {
@@ -607,6 +611,10 @@ onMounted(async () => {
 }
 
 @media (prefers-color-scheme: dark) {
+  .config-tabs {
+    border-bottom-color: rgba(129, 140, 248, 0.2);
+  }
+
   .config-tab {
     color: #a0aec0;
   }

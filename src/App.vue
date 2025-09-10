@@ -12,6 +12,7 @@ const feedbackStore = useFeedbackStore()
 
 let unlistenFeedbackRequest: (() => void) | null = null
 
+
 // 全局事件监听器
 onMounted(async () => {
   console.log('🚀 App mounted, setting up global event listeners...')
@@ -21,6 +22,8 @@ onMounted(async () => {
     unlistenFeedbackRequest = await listen<FeedbackData>('feedback-request', async (event) => {
       console.log('📡 Global: Received feedback-request event:', event)
       console.log('📦 Event payload:', event.payload)
+      console.log('📊 Current feedback tabs before adding:', feedbackStore.feedbackTabs.length)
+      console.log('📊 Current active tab ID:', feedbackStore.activeTabId)
 
       try {
         // 播放系统提示音通知用户有新的feedback请求
@@ -43,23 +46,22 @@ onMounted(async () => {
         console.log('📦 Adding feedback session to global store...')
         const isOnFeedbackPage = router.currentRoute.value.path === '/feedback'
         const currentTabCount = feedbackStore.feedbackTabs.length
-        const hasNewTabs = feedbackStore.newFeedbackCount > 0
+        console.log('📊 Current state - isOnFeedbackPage:', isOnFeedbackPage, 'tabCount:', currentTabCount)
 
-        console.log('📊 Current state - isOnFeedbackPage:', isOnFeedbackPage, 'tabCount:', currentTabCount, 'hasNewTabs:', hasNewTabs)
-
-        // 优化的自动切换逻辑：
-        // 1. 如果没有其他tab，总是自动切换
-        // 2. 如果有未查看的新tab，不自动切换（让用户先处理当前的）
-        // 3. 如果所有现有tab都已查看，可以自动切换到新的
-        const shouldAutoSwitch = currentTabCount === 0 || !hasNewTabs
+        // 简化的自动切换逻辑：只有在第一个tab或没有活动tab时才自动切换
+        const shouldAutoSwitch = currentTabCount === 0 || !feedbackStore.activeTabId
 
         feedbackStore.addFeedbackSession(event.payload, {
           autoSwitch: shouldAutoSwitch
         })
 
+        console.log('📊 Feedback tabs after adding:', feedbackStore.feedbackTabs.length)
+        console.log('📊 New active tab ID:', feedbackStore.activeTabId)
+
         // 确保 tab 内容可见性
         setTimeout(() => {
           feedbackStore.ensureActiveTabVisible()
+          console.log('📊 After ensuring visibility - tabs:', feedbackStore.feedbackTabs.length)
         }, 200)
 
         // 导航到 Feedback 页面（如果不在该页面）
@@ -83,6 +85,16 @@ onMounted(async () => {
     })
 
     console.log('✅ Global event listeners setup complete')
+    
+    // 在事件监听器设置完成后，手动扫描 pending 的 feedback 请求
+    // 这确保了重启 GUI 后能正确加载之前未处理的请求
+    console.log('🔍 Scanning for pending feedback requests...')
+    try {
+      const result = await invoke('scan_pending_feedback')
+      console.log('✅ Pending feedback scan completed:', result)
+    } catch (error) {
+      console.error('❌ Failed to scan pending feedback requests:', error)
+    }
   } catch (error) {
     console.error('❌ Failed to setup global event listeners:', error)
   }

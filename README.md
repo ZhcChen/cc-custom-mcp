@@ -100,6 +100,7 @@ echo '{"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "ec
       "command": "/path/to/your/cc-custom-mcp",
       "args": ["--mcp-mode"],
       "timeout": 600,
+      "_comment": "autoApprove is Cursor-specific, remove this line for other AIs",
       "autoApprove": ["echo", "file_read", "system_info"]
     }
   }

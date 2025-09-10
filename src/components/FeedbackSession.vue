@@ -126,6 +126,8 @@ const feedbackHistory = ref<Array<{ content: string; timestamp: string }>>([])
 // 标记会话是否已结束（提交或取消），防止重复操作
 const sessionEnded = ref(false)
 
+
+
 function formatTime(timestamp: string) {
   return new Date(timestamp).toLocaleString()
 }
@@ -137,11 +139,15 @@ function handleKeydown(event: KeyboardEvent) {
   }
 }
 
+
+
+
+
 async function sendFeedback() {
   if (sending.value || sessionEnded.value) return
 
   sending.value = true
-  sessionEnded.value = true
+  // 不要立即设置 sessionEnded，等提交成功后再设置
 
   try {
     const feedbackContent = feedbackText.value.trim() || '(无内容)'
@@ -161,6 +167,7 @@ async function sendFeedback() {
     })
 
     submitted.value = true
+    sessionEnded.value = true  // 只有提交成功后才设置为已结束
 
     setTimeout(() => {
       emit('close')
@@ -168,26 +175,33 @@ async function sendFeedback() {
 
   } catch (error) {
     console.error('Failed to send feedback:', error)
-    sessionEnded.value = false // 失败时允许重试
+    // 失败时不设置 sessionEnded，允许重试
   } finally {
     sending.value = false
   }
 }
 
 async function cancelFeedback() {
-  if (sessionEnded.value) return
+  if (sessionEnded.value) {
+    console.log(`⚠️ Session ${props.sessionId} already ended, skipping cancel`)
+    return
+  }
+  
+  console.log(`🚫 Cancelling feedback session: ${props.sessionId}`)
   sessionEnded.value = true
 
   try {
     await invoke('cancel_feedback', { sessionId: props.sessionId })
-    console.log(`✅ Feedback session cancelled: ${props.sessionId}`)
+    console.log(`✅ Feedback session cancelled successfully: ${props.sessionId}`)
   } catch (error) {
-    console.error('Failed to cancel feedback session:', error)
+    console.error(`❌ Failed to cancel feedback session ${props.sessionId}:`, error)
     // 即便取消失败，也认为会话已尝试结束
   }
 }
 
 function handleClose() {
+  // 用户通过组件内关闭按钮关闭 tab
+  console.log(`🚫 User closing feedback session via component close button: ${props.sessionId}`)
   cancelFeedback()
   emit('close')
 }
@@ -199,8 +213,9 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  // 如果会话没有被手动提交或关闭，则在组件卸载时自动取消
-  cancelFeedback()
+  // 移除自动取消逻辑，只在用户主动关闭时才取消
+  // 组件卸载时不再自动取消 feedback 会话
+  console.log(`📝 FeedbackSession component unmounted for session: ${props.sessionId}`)
 })
 </script>
 
@@ -210,6 +225,9 @@ onUnmounted(() => {
   height: 100%;
   gap: 1rem;
   padding: 1rem;
+  min-height: 0; /* 确保 flex 子元素可以收缩 */
+  max-height: 100%; /* 确保不超过父容器高度 */
+  overflow: hidden; /* 防止整个会话区域溢出 */
 }
 
 .ai-response-panel,
@@ -221,6 +239,7 @@ onUnmounted(() => {
   border-radius: 0.75rem;
   border: 1px solid rgba(209, 213, 219, 0.3);
   overflow: hidden;
+  min-height: 0; /* 确保 flex 子元素可以收缩 */
 }
 
 .panel-header {
@@ -317,6 +336,9 @@ onUnmounted(() => {
   flex: 1;
   padding: 1rem;
   overflow-y: auto;
+  min-height: 0; /* 确保可以收缩到内容区域 */
+  /* 使用更精确的高度计算 - 减去头部区域高度 */
+  height: calc(100% - 120px); /* 减去 panel-header 的大约高度 */
 }
 
 .response-text {
@@ -344,6 +366,8 @@ onUnmounted(() => {
   flex-direction: column;
   padding: 1rem;
   gap: 1rem;
+  min-height: 0; /* 确保可以收缩 */
+  overflow-y: auto; /* 右侧反馈区域也可以独立滚动 */
 }
 
 .success-message {
@@ -399,7 +423,7 @@ onUnmounted(() => {
 
 .feedback-textarea {
   width: 100%;
-  min-height: 120px;
+  min-height: 240px; /* 从 120px 增加到 240px，高度翻倍 */
   padding: 0.75rem;
   border: 1px solid rgba(209, 213, 219, 0.5);
   border-radius: 0.5rem;

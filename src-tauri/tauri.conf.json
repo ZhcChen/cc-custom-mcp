@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "cc-custom-mcp",
+  "productName": "ccMCP",
   "version": "0.1.0",
   "identifier": "org.nsngc.cc-custom-mcp",
   "build": {

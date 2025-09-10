@@ -41,6 +41,7 @@ anyhow = "1.0"
 hostname = "0.3"
 lazy_static = "1.4"
 async-trait = "0.1"
+sysinfo = "0.30"  # 用于进程检测
 
 # 系统提示音依赖
 [target.'cfg(target_os = "macos")'.dependencies]

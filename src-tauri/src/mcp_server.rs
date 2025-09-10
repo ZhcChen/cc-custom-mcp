@@ -9,6 +9,7 @@ use tauri::Emitter;
 use chrono;
 use std::time::Duration;
 use async_trait::async_trait;
+use sysinfo::System;
 
 // AI来源信息结构
 #[derive(Debug, Clone, PartialEq)]
@@ -105,6 +106,73 @@ fn is_session_cancelled(session_id: &str) -> bool {
     !path.exists()
 }
 
+// 检查 GUI 应用是否正在运行
+fn is_gui_running() -> bool {
+    let mut system = System::new_all();
+    system.refresh_processes();
+    
+    let current_exe = std::env::current_exe().ok();
+    if let Some(exe_path) = current_exe {
+        let exe_name = exe_path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("cc-custom-mcp");
+        
+        // 检查是否有不带 --mcp-mode 参数的进程在运行
+        for (pid, process) in system.processes() {
+            if process.name() == exe_name {
+                let cmd_line = process.cmd();
+                // 如果找到同名进程但不包含 --mcp-mode 参数，说明 GUI 在运行
+                if !cmd_line.iter().any(|arg| arg == "--mcp-mode") {
+                    eprintln!("🖥️ GUI application is already running (PID: {})", pid);
+                    return true;
+                }
+            }
+        }
+    }
+    
+    eprintln!("🖥️ No GUI application detected");
+    false
+}
+
+// 启动 GUI 应用
+async fn start_gui_application() -> Result<()> {
+    let current_exe = std::env::current_exe()?;
+    
+    eprintln!("🚀 Starting GUI application: {:?}", current_exe);
+    
+    let mut cmd = tokio::process::Command::new(&current_exe);
+    
+    // 在后台启动 GUI 应用，不等待其完成
+    match cmd.spawn() {
+        Ok(mut child) => {
+            // 分离子进程，让它独立运行
+            tokio::spawn(async move {
+                if let Err(e) = child.wait().await {
+                    eprintln!("⚠️ GUI application exited with error: {}", e);
+                }
+            });
+            
+            // 等待一下确保 GUI 应用启动
+            tokio::time::sleep(Duration::from_millis(2000)).await;
+            eprintln!("✅ GUI application started successfully");
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("❌ Failed to start GUI application: {}", e);
+            Err(anyhow::anyhow!("Failed to start GUI application: {}", e))
+        }
+    }
+}
+
+// 确保 GUI 应用正在运行
+async fn ensure_gui_running() -> Result<()> {
+    if !is_gui_running() {
+        eprintln!("🔄 GUI not running, starting it now...");
+        start_gui_application().await?;
+    }
+    Ok(())
+}
+
 
 use tokio::io::{stdin, stdout};
 
@@ -154,7 +222,6 @@ pub struct LocalMcpServer {
     tools: Arc<Mutex<HashMap<String, Box<dyn McpTool>>>>,
     server_info: ServerInfo,
     app_handle: Option<tauri::AppHandle>,
-    dev_mode: bool,
 }
 
 #[derive(Clone)]
@@ -174,7 +241,6 @@ impl LocalMcpServer {
                 description: "Local tools for AI assistants".to_string(),
             },
             app_handle: None,
-            dev_mode: false,
         };
 
         eprintln!("📋 Registering built-in tools...");
@@ -214,15 +280,6 @@ impl LocalMcpServer {
         }
     }
 
-    pub fn set_dev_mode(&mut self, dev_mode: bool) {
-        self.dev_mode = dev_mode;
-        if dev_mode {
-            eprintln!("🔧 MCP Server configured for DEVELOPMENT mode");
-            self.server_info.description = format!("{} (Development Mode)", self.server_info.description);
-        } else {
-            eprintln!("🚀 MCP Server configured for PRODUCTION mode");
-        }
-    }
 
     pub async fn execute_tool(&self, name: &str, params: Value) -> Result<Value> {
         let tool = {
@@ -278,11 +335,14 @@ impl LocalMcpServer {
                             }
                         }
                         Err(e) => {
-                            eprintln!("MCP Server: Error parsing JSON: {}", e);
+                            eprintln!("MCP Server: Error parsing JSON: {} - Input: {}", e, line.trim());
                             let error_response = json!({
                                 "jsonrpc": "2.0",
                                 "id": null,
-                                "error": { "code": -32700, "message": "Parse error" }
+                                "error": { 
+                                    "code": -32700, 
+                                    "message": format!("Parse error: {}", e)
+                                }
                             });
                             if let Ok(error_str) = serde_json::to_string(&error_response) {
                                 let _ = stdout.write_all(error_str.as_bytes()).await;
@@ -328,17 +388,26 @@ impl LocalMcpServer {
                 let tool_name = request["params"]["name"].as_str().unwrap_or("");
                 let arguments = request["params"]["arguments"].clone();
 
+                eprintln!("🔧 Executing tool: {} with args: {}", tool_name, arguments);
+                
                 match self.execute_tool(tool_name, arguments).await {
-                    Ok(result) => json!({
-                        "jsonrpc": "2.0", "id": id, "result": {
-                            "content": [{"type": "text", "text": result.to_string()}]
-                        }
-                    }),
-                    Err(e) => json!({
-                        "jsonrpc": "2.0", "id": id, "error": {
-                            "code": -32603, "message": format!("Tool execution failed: {}", e)
-                        }
-                    }),
+                    Ok(result) => {
+                        eprintln!("✅ Tool '{}' executed successfully", tool_name);
+                        json!({
+                            "jsonrpc": "2.0", "id": id, "result": {
+                                "content": [{"type": "text", "text": result.to_string()}]
+                            }
+                        })
+                    },
+                    Err(e) => {
+                        eprintln!("❌ Tool '{}' execution failed: {}", tool_name, e);
+                        json!({
+                            "jsonrpc": "2.0", "id": id, "error": {
+                                "code": -32603, 
+                                "message": format!("Tool '{}' execution failed: {}", tool_name, e)
+                            }
+                        })
+                    },
                 }
             }
             _ => json!({
@@ -425,8 +494,21 @@ impl McpTool for FeedbackTool {
         // 用于生成显示名称的 AiSource
         let ai_source = AiSource::from_string(&raw_mcp_source);
 
+        // 确保 GUI 应用正在运行（仅在 MCP 模式下需要检查）
+        if app.is_none() {
+            eprintln!("🔍 Checking if GUI application is running...");
+            if let Err(e) = ensure_gui_running().await {
+                eprintln!("⚠️ Failed to ensure GUI is running: {}", e);
+                // 继续执行，即使 GUI 启动失败也要写入文件，让文件监听器处理
+            }
+        }
+
         // 写入请求文件
-        write_feedback_request(&session_id, &ai_response, &context, &raw_mcp_source, &ai_source)?;
+        if let Err(e) = write_feedback_request(&session_id, &ai_response, &context, &raw_mcp_source, &ai_source) {
+            eprintln!("❌ Failed to write feedback request: {}", e);
+            return Err(anyhow::anyhow!("Failed to write feedback request: {}", e));
+        }
+        eprintln!("📝 Feedback request written successfully for session: {}", session_id);
 
         if let Some(app_handle) = app {
             let feedback_data = json!({
@@ -438,10 +520,16 @@ impl McpTool for FeedbackTool {
                 "aiSourceDisplay": ai_source.to_display_name()
             });
 
-            app_handle.emit("feedback-request", &feedback_data)?;
+            if let Err(e) = app_handle.emit("feedback-request", &feedback_data) {
+                eprintln!("❌ Failed to emit feedback-request event: {}", e);
+            } else {
+                eprintln!("📡 Feedback request event emitted successfully");
+            }
             
             tokio::spawn(async {
-                let _ = crate::system_sound::play_notification_sound_async().await;
+                if let Err(e) = crate::system_sound::play_notification_sound_async().await {
+                    eprintln!("🔔 Failed to play notification sound: {}", e);
+                }
             });
         }
         // 移除超时限制，无限等待用户反馈

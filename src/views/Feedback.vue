@@ -1,10 +1,12 @@
 <template>
   <div class="feedback-page">
     <div class="feedback-container">
-      <TabContainer
+      <UnifiedTabContainer
         :active-tab-id="feedbackStore.activeTabId"
         :tabs="feedbackStore.feedbackTabs"
+        :show-close-button="true"
         @close-tab="closeFeedbackTab"
+        @close-all-tabs="closeAllFeedbackTabs"
         @tab-changed="onTabChanged"
         @update:active-tab-id="onTabChanged"
       />
@@ -29,7 +31,7 @@
 import { onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useFeedbackStore, type FeedbackData } from '../stores/feedback'
-import TabContainer from '../components/TabContainer.vue'
+import UnifiedTabContainer from '../components/UnifiedTabContainer.vue'
 
 const router = useRouter()
 const feedbackStore = useFeedbackStore()
@@ -40,8 +42,43 @@ function handleFeedbackRequest(data: FeedbackData) {
   feedbackStore.addFeedbackSession(data)
 }
 
-function closeFeedbackTab(tabId: string) {
+async function closeFeedbackTab(tabId: string) {
+  console.log('🚫 Closing feedback tab:', tabId)
+  
+  // 首先尝试取消 feedback 请求
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    await invoke('cancel_feedback', { sessionId: tabId })
+    console.log(`✅ Feedback session cancelled successfully: ${tabId}`)
+  } catch (error) {
+    console.error(`❌ Failed to cancel feedback session ${tabId}:`, error)
+    // 即使取消失败，也继续移除 tab
+  }
+  
+  // 然后从 store 中移除
   feedbackStore.removeFeedbackSession(tabId)
+}
+
+async function closeAllFeedbackTabs() {
+  console.log('🚫 Closing all feedback tabs...')
+  
+  const tabCount = feedbackStore.feedbackTabs.length
+  if (tabCount === 0) {
+    console.log('📭 No feedback tabs to close')
+    return
+  }
+
+  console.log(`📊 Closing ${tabCount} feedback tabs`)
+  
+  try {
+    // 使用 store 中的 closeAllSessions 方法
+    await feedbackStore.closeAllSessions()
+    console.log('✅ All feedback tabs closed successfully')
+  } catch (error) {
+    console.error('❌ Error closing all feedback tabs:', error)
+    // 即使出错，也显示一个通知
+    feedbackStore.addNotification('关闭全部会话时出现错误')
+  }
 }
 
 function onTabChanged(tabId: string) {
@@ -93,18 +130,19 @@ onMounted(() => {
 
 <style scoped>
 .feedback-page {
-  height: 100%;
+  height: 100vh; /* 使用视口高度而不是 100% */
   display: flex;
   flex-direction: column;
   padding: 1.5rem;
   gap: 1.5rem;
+  overflow: hidden; /* 防止整个页面滚动 */
 }
 
 .feedback-container {
   flex: 1;
   display: flex;
   flex-direction: column;
-  min-height: 0;
+  min-height: 0; /* 确保 flex 子元素可以收缩 */
   gap: 1rem;
 }
 
