@@ -316,9 +316,32 @@ export const useFeedbackStore = defineStore('feedback', () => {
 
   // 检查当前活跃 tab 的输入框是否聚焦
   function isCurrentTabInputFocused(): boolean {
-    // 这个方法需要在 TabContainer 或 Feedback 页面中实现具体的聚焦检查逻辑
-    // 这里先返回 false 作为默认值，具体实现在 App.vue 中
-    return false
+    try {
+      // 检查当前活跃元素是否是 feedback 输入框
+      const activeElement = document.activeElement
+      
+      if (!activeElement) return false
+      
+      // 检查是否是 feedback textarea 或 emphasis input
+      const isFeedbackTextarea = activeElement.classList.contains('feedback-textarea')
+      const isEmphasisInput = activeElement.classList.contains('emphasis-input')
+      
+      // 检查是否在 feedback session 容器内
+      const feedbackContainer = activeElement.closest('.feedback-session')
+      
+      console.log('🔍 Focus check:', {
+        activeElement: activeElement.tagName,
+        classList: Array.from(activeElement.classList),
+        isFeedbackTextarea,
+        isEmphasisInput,
+        inFeedbackContainer: !!feedbackContainer
+      })
+      
+      return (isFeedbackTextarea || isEmphasisInput) && !!feedbackContainer
+    } catch (error) {
+      console.error('❌ Error checking input focus:', error)
+      return false
+    }
   }
 
   return {

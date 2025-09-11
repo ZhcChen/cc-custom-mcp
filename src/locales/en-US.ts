@@ -120,11 +120,13 @@ export default {
     aiResponse: 'AI Response',
     userFeedback: 'User Feedback',
     placeholder: 'Enter your feedback...',
-    hint: 'Shift + Enter to send',
+    hint: 'Enter for new line, Shift + Enter to send',
     send: 'Send',
     sending: 'Sending...',
     submitted: 'Feedback Submitted!',
     history: 'Feedback History',
+    customEmphasis: 'Custom Emphasis',
+    customEmphasisPlaceholder: 'Enter content to emphasize...',
     empty: {
       title: 'No feedback sessions',
       description: 'Interactive feedback interface will appear here when AI calls the feedback tool'

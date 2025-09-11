@@ -120,11 +120,13 @@ export default {
     aiResponse: 'AI 回答',
     userFeedback: '用户反馈',
     placeholder: '请输入您的反馈...',
-    hint: 'Shift + Enter 发送',
+    hint: 'Enter 换行，Shift + Enter 发送',
     send: '发送',
     sending: '发送中...',
     submitted: '反馈已提交！',
     history: '反馈历史',
+    customEmphasis: '自定义强调语',
+    customEmphasisPlaceholder: '请输入要强调的内容...',
     empty: {
       title: '暂无反馈会话',
       description: '当 AI 调用 feedback 工具时，会在这里显示交互式反馈界面'

@@ -48,8 +48,23 @@ onMounted(async () => {
         const currentTabCount = feedbackStore.feedbackTabs.length
         console.log('📊 Current state - isOnFeedbackPage:', isOnFeedbackPage, 'tabCount:', currentTabCount)
 
-        // 简化的自动切换逻辑：只有在第一个tab或没有活动tab时才自动切换
-        const shouldAutoSwitch = currentTabCount === 0 || !feedbackStore.activeTabId
+        // 智能自动切换逻辑：考虑输入框聚焦状态
+        const hasNoTabs = currentTabCount === 0
+        const hasNoActiveTab = !feedbackStore.activeTabId
+        const isInputFocused = feedbackStore.isCurrentTabInputFocused()
+        
+        // 自动切换条件：
+        // 1. 没有任何 tab 时
+        // 2. 没有活动 tab 时  
+        // 3. 有 tab 但用户没有在输入反馈时
+        const shouldAutoSwitch = hasNoTabs || hasNoActiveTab || !isInputFocused
+
+        console.log('🔄 Auto-switch decision:', {
+          hasNoTabs,
+          hasNoActiveTab, 
+          isInputFocused,
+          shouldAutoSwitch
+        })
 
         feedbackStore.addFeedbackSession(event.payload, {
           autoSwitch: shouldAutoSwitch

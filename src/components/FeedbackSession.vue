@@ -75,6 +75,30 @@
               {{ sending ? $t('feedback.sending') : $t('feedback.send') }}
             </button>
           </div>
+          
+          <!-- 自定义强调语设置 -->
+          <div class="custom-emphasis-section">
+            <div class="emphasis-form">
+              <div class="form-group">
+                <label class="checkbox-label">
+                  <input 
+                    type="checkbox" 
+                    v-model="useCustomEmphasis"
+                    class="emphasis-checkbox"
+                  />
+                  <span class="checkbox-text">{{ $t('feedback.customEmphasis') }}</span>
+                </label>
+              </div>
+              <div class="form-group" v-show="useCustomEmphasis">
+                <input
+                  type="text"
+                  v-model="customEmphasisText"
+                  :placeholder="$t('feedback.customEmphasisPlaceholder')"
+                  class="emphasis-input"
+                />
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- 反馈历史 -->
@@ -97,7 +121,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 
 interface Props {
@@ -123,6 +147,14 @@ const sending = ref(false)
 const submitted = ref(false)
 const feedbackHistory = ref<Array<{ content: string; timestamp: string }>>([])
 
+// 自定义强调语相关状态
+const useCustomEmphasis = ref(false)
+const customEmphasisText = ref('')
+
+// 本地存储键名
+const EMPHASIS_STORAGE_KEY = 'feedback_custom_emphasis'
+const EMPHASIS_TEXT_STORAGE_KEY = 'feedback_custom_emphasis_text'
+
 // 标记会话是否已结束（提交或取消），防止重复操作
 const sessionEnded = ref(false)
 
@@ -132,11 +164,51 @@ function formatTime(timestamp: string) {
   return new Date(timestamp).toLocaleString()
 }
 
+// 从本地存储加载自定义强调语设置
+function loadEmphasisSettings() {
+  try {
+    const savedUseEmphasis = localStorage.getItem(EMPHASIS_STORAGE_KEY)
+    const savedEmphasisText = localStorage.getItem(EMPHASIS_TEXT_STORAGE_KEY)
+    
+    if (savedUseEmphasis !== null) {
+      useCustomEmphasis.value = savedUseEmphasis === 'true'
+    }
+    
+    if (savedEmphasisText !== null) {
+      customEmphasisText.value = savedEmphasisText
+    }
+    
+    console.log('📋 Loaded custom emphasis settings:', {
+      useCustomEmphasis: useCustomEmphasis.value,
+      customEmphasisText: customEmphasisText.value
+    })
+  } catch (error) {
+    console.error('Failed to load emphasis settings from localStorage:', error)
+  }
+}
+
+// 保存自定义强调语设置到本地存储
+function saveEmphasisSettings() {
+  try {
+    localStorage.setItem(EMPHASIS_STORAGE_KEY, useCustomEmphasis.value.toString())
+    localStorage.setItem(EMPHASIS_TEXT_STORAGE_KEY, customEmphasisText.value)
+    
+    console.log('💾 Saved custom emphasis settings:', {
+      useCustomEmphasis: useCustomEmphasis.value,
+      customEmphasisText: customEmphasisText.value
+    })
+  } catch (error) {
+    console.error('Failed to save emphasis settings to localStorage:', error)
+  }
+}
+
 function handleKeydown(event: KeyboardEvent) {
   if (event.key === 'Enter' && event.shiftKey) {
+    // Shift + Enter 发送反馈
     event.preventDefault()
     sendFeedback()
   }
+  // 单独按 Enter 允许默认行为（换行）
 }
 
 
@@ -150,7 +222,13 @@ async function sendFeedback() {
   // 不要立即设置 sessionEnded，等提交成功后再设置
 
   try {
-    const feedbackContent = feedbackText.value.trim() || '(无内容)'
+    let feedbackContent = feedbackText.value.trim() || '(无内容)'
+    
+    // 如果勾选了自定义强调语且有内容，则添加到反馈内容末尾
+    if (useCustomEmphasis.value && customEmphasisText.value.trim()) {
+      feedbackContent += '\n\n' + customEmphasisText.value.trim()
+    }
+    
     await invoke('submit_feedback', {
       sessionId: props.sessionId,
       feedbackContent: feedbackContent
@@ -206,13 +284,46 @@ function handleClose() {
   emit('close')
 }
 
+// 监听自定义强调语设置变化并自动保存
+watch([useCustomEmphasis, customEmphasisText], () => {
+  saveEmphasisSettings()
+}, { deep: true })
+
+// 处理窗口失去焦点时取消输入框聚焦
+function handleWindowBlur() {
+  if (feedbackInput.value) {
+    feedbackInput.value.blur()
+  }
+}
+
+// 处理窗口获得焦点时重新聚焦输入框（可选）
+function handleWindowFocus() {
+  // 只有在反馈会话还未结束时才重新聚焦
+  if (!sessionEnded.value && !submitted.value && feedbackInput.value) {
+    nextTick(() => {
+      feedbackInput.value?.focus()
+    })
+  }
+}
+
 onMounted(() => {
+  // 加载保存的自定义强调语设置
+  loadEmphasisSettings()
+  
+  // 添加窗口焦点事件监听器
+  window.addEventListener('blur', handleWindowBlur)
+  window.addEventListener('focus', handleWindowFocus)
+  
   nextTick(() => {
     feedbackInput.value?.focus()
   })
 })
 
 onUnmounted(() => {
+  // 清理窗口焦点事件监听器
+  window.removeEventListener('blur', handleWindowBlur)
+  window.removeEventListener('focus', handleWindowFocus)
+  
   // 移除自动取消逻辑，只在用户主动关闭时才取消
   // 组件卸载时不再自动取消 feedback 会话
   console.log(`📝 FeedbackSession component unmounted for session: ${props.sessionId}`)
@@ -440,6 +551,70 @@ onUnmounted(() => {
   box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
 }
 
+.custom-emphasis-section {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  background: rgba(248, 250, 252, 0.5);
+  border-radius: 0.5rem;
+  border: 1px solid rgba(209, 213, 219, 0.3);
+}
+
+.emphasis-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #374151;
+}
+
+.emphasis-checkbox {
+  width: 16px;
+  height: 16px;
+  border-radius: 0.25rem;
+  border: 1px solid #d1d5db;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.emphasis-checkbox:checked {
+  background-color: #667eea;
+  border-color: #667eea;
+}
+
+.checkbox-text {
+  user-select: none;
+}
+
+.emphasis-input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid rgba(209, 213, 219, 0.5);
+  border-radius: 0.375rem;
+  background: rgba(255, 255, 255, 0.9);
+  font-size: 0.875rem;
+  transition: all 0.2s ease;
+  margin-top: 0.25rem;
+}
+
+.emphasis-input:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.1);
+}
+
 .input-actions {
   display: flex;
   justify-content: space-between;
@@ -595,6 +770,36 @@ onUnmounted(() => {
     color: #94a3b8;
   }
 
+  .custom-emphasis-section {
+    background: rgba(51, 65, 85, 0.5);
+    border-color: rgba(129, 140, 248, 0.2);
+  }
+
+  .checkbox-label {
+    color: #f1f5f9;
+  }
+
+  .emphasis-checkbox {
+    border-color: rgba(129, 140, 248, 0.3);
+    background: rgba(51, 65, 85, 0.8);
+  }
+
+  .emphasis-checkbox:checked {
+    background-color: #818cf8;
+    border-color: #818cf8;
+  }
+
+  .emphasis-input {
+    background: rgba(51, 65, 85, 0.8);
+    border-color: rgba(129, 140, 248, 0.3);
+    color: #f1f5f9;
+  }
+
+  .emphasis-input:focus {
+    border-color: #818cf8;
+    box-shadow: 0 0 0 2px rgba(129, 140, 248, 0.2);
+  }
+
   .feedback-history h4 {
     color: #f1f5f9;
   }
@@ -671,6 +876,36 @@ onUnmounted(() => {
 
 :global(.dark) .input-hint {
   color: #94a3b8;
+}
+
+:global(.dark) .custom-emphasis-section {
+  background: rgba(51, 65, 85, 0.5);
+  border-color: rgba(129, 140, 248, 0.2);
+}
+
+:global(.dark) .checkbox-label {
+  color: #f1f5f9;
+}
+
+:global(.dark) .emphasis-checkbox {
+  border-color: rgba(129, 140, 248, 0.3);
+  background: rgba(51, 65, 85, 0.8);
+}
+
+:global(.dark) .emphasis-checkbox:checked {
+  background-color: #818cf8;
+  border-color: #818cf8;
+}
+
+:global(.dark) .emphasis-input {
+  background: rgba(51, 65, 85, 0.8);
+  border-color: rgba(129, 140, 248, 0.3);
+  color: #f1f5f9;
+}
+
+:global(.dark) .emphasis-input:focus {
+  border-color: #818cf8;
+  box-shadow: 0 0 0 2px rgba(129, 140, 248, 0.2);
 }
 
 :global(.dark) .feedback-history h4 {
