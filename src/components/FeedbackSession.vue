@@ -226,7 +226,7 @@ onUnmounted(() => {
   gap: 1rem;
   padding: 1rem;
   min-height: 0; /* 确保 flex 子元素可以收缩 */
-  max-height: 100%; /* 确保不超过父容器高度 */
+  max-height: calc(100vh - 180px); /* 更严格的高度限制，减去页面padding和tab高度 */
   overflow: hidden; /* 防止整个会话区域溢出 */
 }
 
@@ -337,8 +337,8 @@ onUnmounted(() => {
   padding: 1rem;
   overflow-y: auto;
   min-height: 0; /* 确保可以收缩到内容区域 */
-  /* 使用更精确的高度计算 - 减去头部区域高度 */
-  height: calc(100% - 120px); /* 减去 panel-header 的大约高度 */
+  /* 使用更保守的高度计算，确保不会导致页面滚动 */
+  max-height: calc(100vh - 320px); /* 进一步减少高度，给其他元素留出足够空间 */
 }
 
 .response-text {

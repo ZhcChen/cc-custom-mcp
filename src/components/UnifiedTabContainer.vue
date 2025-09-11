@@ -3,7 +3,19 @@
     <!-- Tab 头部 - 使用仪表盘样式 -->
     <div class="unified-tab-header">
       <div class="tab-header-content">
-        <div class="unified-tab-list">
+        <!-- 左滚动按钮 -->
+        <button
+          v-show="showScrollButtons && canScrollLeft"
+          class="tab-scroll-btn tab-scroll-left"
+          @click="scrollLeft"
+          :title="'向左滚动'"
+        >
+          <svg viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clip-rule="evenodd" />
+          </svg>
+        </button>
+        
+        <div class="unified-tab-list" ref="tabListRef" @scroll="onTabListScroll">
           <button
             v-for="tab in tabs"
             :key="tab.id"
@@ -27,6 +39,18 @@
             </button>
           </button>
         </div>
+        
+        <!-- 右滚动按钮 -->
+        <button
+          v-show="showScrollButtons && canScrollRight"
+          class="tab-scroll-btn tab-scroll-right"
+          @click="scrollRight"
+          :title="'向右滚动'"
+        >
+          <svg viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" />
+          </svg>
+        </button>
         
         <!-- 关闭全部按钮 -->
         <div v-if="showCloseButton && tabs.length > 1" class="close-all-container">
@@ -73,7 +97,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 
 interface TabItem {
   id: string
@@ -106,6 +130,12 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 const emit = defineEmits<Emits>()
+
+// 滚动相关的 refs 和状态
+const tabListRef = ref<HTMLElement>()
+const canScrollLeft = ref(false)
+const canScrollRight = ref(false)
+const showScrollButtons = ref(false)
 
 const currentActiveTabId = computed(() => {
   // 如果有明确的 activeTabId 且对应的 tab 存在，使用它
@@ -145,6 +175,72 @@ function getTabTooltip(tab: TabItem): string {
   const source = tab.aiSourceDisplay || tab.aiSource || 'Unknown AI Tool'
   return tab.aiSource ? `${tab.title} - 来源: ${source}` : tab.title
 }
+
+// 检查滚动状态
+function checkScrollState() {
+  if (!tabListRef.value) return
+  
+  const element = tabListRef.value
+  const scrollLeft = element.scrollLeft
+  const scrollWidth = element.scrollWidth
+  const clientWidth = element.clientWidth
+  
+  canScrollLeft.value = scrollLeft > 0
+  canScrollRight.value = scrollLeft < scrollWidth - clientWidth
+  showScrollButtons.value = scrollWidth > clientWidth
+}
+
+// 向左滚动
+function scrollLeft() {
+  if (!tabListRef.value) return
+  
+  const scrollAmount = 200 // 每次滚动的像素数
+  tabListRef.value.scrollBy({
+    left: -scrollAmount,
+    behavior: 'smooth'
+  })
+}
+
+// 向右滚动
+function scrollRight() {
+  if (!tabListRef.value) return
+  
+  const scrollAmount = 200 // 每次滚动的像素数
+  tabListRef.value.scrollBy({
+    left: scrollAmount,
+    behavior: 'smooth'
+  })
+}
+
+// 监听滚动事件
+function onTabListScroll() {
+  checkScrollState()
+}
+
+// 窗口大小改变时重新检查滚动状态
+function onWindowResize() {
+  checkScrollState()
+}
+
+// 组件挂载时设置监听器
+onMounted(() => {
+  nextTick(() => {
+    checkScrollState()
+    window.addEventListener('resize', onWindowResize)
+  })
+})
+
+// 组件卸载时清理监听器
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', onWindowResize)
+})
+
+// 监听 tabs 变化，重新检查滚动状态
+watch(() => props.tabs, () => {
+  nextTick(() => {
+    checkScrollState()
+  })
+}, { deep: true })
 </script>
 
 <style scoped>
@@ -167,7 +263,8 @@ function getTabTooltip(tab: TabItem): string {
 .tab-header-content {
   display: flex;
   align-items: flex-start;
-  gap: 1rem;
+  gap: 0.5rem;
+  position: relative;
 }
 
 .unified-tab-list {
@@ -326,6 +423,50 @@ function getTabTooltip(tab: TabItem): string {
   font-weight: 500;
 }
 
+/* 滚动按钮样式 */
+.tab-scroll-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid rgba(102, 126, 234, 0.2);
+  background: rgba(255, 255, 255, 0.9);
+  color: #667eea;
+  cursor: pointer;
+  border-radius: 0.375rem;
+  transition: all 0.2s ease;
+  backdrop-filter: blur(10px);
+  flex-shrink: 0;
+  z-index: 10;
+}
+
+.tab-scroll-btn:hover {
+  background: rgba(102, 126, 234, 0.1);
+  border-color: rgba(102, 126, 234, 0.4);
+  color: #5a67d8;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(102, 126, 234, 0.2);
+}
+
+.tab-scroll-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 1px 2px rgba(102, 126, 234, 0.2);
+}
+
+.tab-scroll-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.tab-scroll-left {
+  margin-right: 0.25rem;
+}
+
+.tab-scroll-right {
+  margin-left: 0.25rem;
+}
+
 .unified-tab-content {
   flex: 1;
   overflow: hidden;
@@ -436,6 +577,19 @@ function getTabTooltip(tab: TabItem): string {
     color: #fca5a5;
     box-shadow: 0 2px 4px rgba(248, 113, 113, 0.3);
   }
+
+  .tab-scroll-btn {
+    border-color: rgba(129, 140, 248, 0.3);
+    background: rgba(30, 41, 59, 0.9);
+    color: #a5b4fc;
+  }
+
+  .tab-scroll-btn:hover {
+    background: rgba(129, 140, 248, 0.2);
+    border-color: rgba(129, 140, 248, 0.5);
+    color: #c7d2fe;
+    box-shadow: 0 2px 4px rgba(129, 140, 248, 0.3);
+  }
 }
 
 :global(.dark) .unified-tab-container {
@@ -497,5 +651,18 @@ function getTabTooltip(tab: TabItem): string {
   border-color: rgba(248, 113, 113, 0.5);
   color: #fca5a5;
   box-shadow: 0 2px 4px rgba(248, 113, 113, 0.3);
+}
+
+:global(.dark) .tab-scroll-btn {
+  border-color: rgba(129, 140, 248, 0.3);
+  background: rgba(30, 41, 59, 0.9);
+  color: #a5b4fc;
+}
+
+:global(.dark) .tab-scroll-btn:hover {
+  background: rgba(129, 140, 248, 0.2);
+  border-color: rgba(129, 140, 248, 0.5);
+  color: #c7d2fe;
+  box-shadow: 0 2px 4px rgba(129, 140, 248, 0.3);
 }
 </style>

@@ -130,10 +130,8 @@ onMounted(() => {
 
 <style scoped>
 .feedback-page {
-  height: 100vh; /* 使用视口高度而不是 100% */
   display: flex;
   flex-direction: column;
-  padding: 1.5rem;
   gap: 1.5rem;
   overflow: hidden; /* 防止整个页面滚动 */
 }
