@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import { useRouter } from 'vue-router'
@@ -11,13 +11,77 @@ const router = useRouter()
 const feedbackStore = useFeedbackStore()
 
 let unlistenFeedbackRequest: (() => void) | null = null
+let unlistenWindowResized: (() => void) | null = null
+let unlistenWindowMoved: (() => void) | null = null
+
+// 窗口尺寸保存相关
+let saveWindowSizeTimeout: NodeJS.Timeout | null = null
+
+// 保存窗口尺寸（防抖处理）
+async function saveWindowSizeDebounced() {
+  if (saveWindowSizeTimeout) {
+    clearTimeout(saveWindowSizeTimeout)
+  }
+  
+  saveWindowSizeTimeout = setTimeout(async () => {
+    try {
+      await invoke('save_current_window_size')
+      console.log('✅ Window size saved')
+    } catch (error) {
+      console.error('❌ Failed to save window size:', error)
+    }
+  }, 500) // 500ms防抖延迟
+}
+
+// 小窗口模式状态
+const isCompactMode = ref(false)
+
+// 初始化小窗口模式状态
+async function initCompactMode() {
+  const savedCompactMode = localStorage.getItem('mcp-manager-compact-mode')
+  const shouldBeCompact = savedCompactMode === 'true'
+  isCompactMode.value = shouldBeCompact
+  
+  console.log('🔧 Initializing compact mode on startup:', { savedCompactMode, shouldBeCompact })
+  
+  // 无论当前状态如何，都应用保存的设置以确保窗口大小正确
+  try {
+    await invoke('set_window_compact_mode', { compact: shouldBeCompact })
+    console.log('✅ Applied window mode on startup:', shouldBeCompact ? 'compact' : 'normal')
+  } catch (error) {
+    console.error('❌ Failed to apply window mode on startup:', error)
+  }
+}
+
+// 监听小窗口模式变化
+function handleCompactModeChange(event: CustomEvent) {
+  isCompactMode.value = event.detail.compactMode
+}
 
 
 // 全局事件监听器
 onMounted(async () => {
   console.log('🚀 App mounted, setting up global event listeners...')
 
+  // 初始化小窗口模式
+  await initCompactMode()
+  
+  // 监听小窗口模式变化事件
+  window.addEventListener('compact-mode-changed', handleCompactModeChange as EventListener)
+
   try {
+    // 监听窗口尺寸变化事件
+    unlistenWindowResized = await listen('tauri://resize', async () => {
+      console.log('📐 Window resized, saving size...')
+      await saveWindowSizeDebounced()
+    })
+    
+    // 监听窗口移动事件
+    unlistenWindowMoved = await listen('tauri://move', async () => {
+      console.log('📐 Window moved, saving position...')
+      await saveWindowSizeDebounced()
+    })
+    
     // 监听来自 Tauri 后端的反馈请求事件
     unlistenFeedbackRequest = await listen<FeedbackData>('feedback-request', async (event) => {
       console.log('📡 Global: Received feedback-request event:', event)
@@ -119,18 +183,35 @@ onUnmounted(() => {
   // 清理事件监听器
   if (unlistenFeedbackRequest) {
     unlistenFeedbackRequest()
-    console.log('🧹 Global event listeners cleaned up')
   }
+  
+  if (unlistenWindowResized) {
+    unlistenWindowResized()
+  }
+  
+  if (unlistenWindowMoved) {
+    unlistenWindowMoved()
+  }
+  
+  // 清理小窗口模式事件监听器
+  window.removeEventListener('compact-mode-changed', handleCompactModeChange as EventListener)
+  
+  // 清理定时器
+  if (saveWindowSizeTimeout) {
+    clearTimeout(saveWindowSizeTimeout)
+  }
+  
+  console.log('🧹 Global event listeners cleaned up')
 })
 </script>
 
 <template>
-  <div class="mcp-manager">
+  <div class="mcp-manager" :class="{ 'compact-mode': isCompactMode }">
     <!-- 左侧菜单栏组件 -->
-    <Sidebar />
+    <Sidebar :compact="isCompactMode" />
 
     <!-- 右侧主内容区域 -->
-    <main class="main-content">
+    <main class="main-content" :class="{ 'compact-content': isCompactMode }">
       <router-view />
     </main>
 
@@ -157,7 +238,23 @@ onUnmounted(() => {
   min-height: 100vh;
   background: rgba(255, 255, 255, 0.1);
   backdrop-filter: blur(10px);
+  transition: margin-left 0.3s ease, padding 0.3s ease;
 }
+
+/* 小窗口模式样式 */
+.mcp-manager.compact-mode {
+  /* 移除max-width限制，让内容占满窗口宽度 */
+  overflow-x: hidden;
+}
+
+.main-content.compact-content {
+  margin-left: 60px; /* 为压缩的侧边栏留出空间 */
+  padding: 1rem; /* 减少内边距 */
+}
+
+/* 小窗口模式动画 - 已移除，因为窗口大小由Tauri控制 */
+
+/* 响应式调整 - 已移除，因为不再限制内容宽度 */
 
 /* 深色模式 */
 @media (prefers-color-scheme: dark) {

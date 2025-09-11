@@ -1,6 +1,6 @@
 <template>
-  <aside class="sidebar">
-    <div class="sidebar-header">
+  <aside class="sidebar" :class="{ 'compact': props.compact }">
+    <div class="sidebar-header" v-if="!props.compact">
       <h1 class="app-title">🔧 {{ $t('app.title') }}</h1>
     </div>
 
@@ -11,9 +11,10 @@
             to="/dashboard"
             class="nav-button"
             active-class="active"
+            :title="props.compact ? $t('nav.dashboard') : ''"
           >
             <span class="nav-icon">📊</span>
-            <span class="nav-text">{{ $t('nav.dashboard') }}</span>
+            <span class="nav-text" v-if="!props.compact">{{ $t('nav.dashboard') }}</span>
           </router-link>
         </li>
         <li class="nav-item">
@@ -21,9 +22,10 @@
             to="/settings"
             class="nav-button"
             active-class="active"
+            :title="props.compact ? $t('nav.settings') : ''"
           >
             <span class="nav-icon">⚙️</span>
-            <span class="nav-text">{{ $t('nav.settings') }}</span>
+            <span class="nav-text" v-if="!props.compact">{{ $t('nav.settings') }}</span>
           </router-link>
         </li>
         <li class="nav-item">
@@ -31,10 +33,11 @@
             to="/feedback"
             class="nav-button"
             active-class="active"
+            :title="props.compact ? $t('nav.feedback') : ''"
           >
             <span class="nav-icon">💬</span>
-            <span class="nav-text">{{ $t('nav.feedback') }}</span>
-            <span v-if="pendingFeedbackCount > 0" class="feedback-badge">
+            <span class="nav-text" v-if="!props.compact">{{ $t('nav.feedback') }}</span>
+            <span v-if="pendingFeedbackCount > 0" class="feedback-badge" :class="{ 'compact-badge': props.compact }">
               {{ pendingFeedbackCount }}
             </span>
           </router-link>
@@ -51,6 +54,14 @@ import { useFeedbackStore } from '../stores/feedback'
 
 // 简化的侧边栏组件，不再显示服务器状态
 // 服务器状态统一在仪表盘中管理和显示
+
+interface Props {
+  compact?: boolean
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  compact: false
+})
 
 const feedbackStore = useFeedbackStore()
 const pendingFeedbackCount = computed(() => feedbackStore.pendingFeedbackCount)
@@ -69,6 +80,22 @@ const pendingFeedbackCount = computed(() => feedbackStore.pendingFeedbackCount)
   top: 0;
   z-index: 100;
   box-shadow: 4px 0 20px rgba(0, 0, 0, 0.1);
+  transition: width 0.3s ease;
+}
+
+/* 小窗口模式样式 */
+.sidebar.compact {
+  width: 60px;
+}
+
+.sidebar.compact .sidebar-nav {
+  padding: 0.5rem 0;
+}
+
+.sidebar.compact .nav-button {
+  padding: 1rem 0.5rem;
+  justify-content: center;
+  position: relative;
 }
 
 .sidebar-header {
@@ -132,6 +159,17 @@ const pendingFeedbackCount = computed(() => feedbackStore.pendingFeedbackCount)
   align-items: center;
   justify-content: center;
   animation: pulse 2s infinite;
+}
+
+.feedback-badge.compact-badge {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.25rem;
+  margin-left: 0;
+  min-width: 1rem;
+  height: 1rem;
+  font-size: 0.625rem;
+  padding: 0.125rem 0.25rem;
 }
 
 .nav-button:hover {

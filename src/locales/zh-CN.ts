@@ -92,7 +92,9 @@ export default {
       theme: '主题',
       selectTheme: '选择主题',
       autoStart: '自动启动',
-      autoStartDesc: '应用启动时自动启动 MCP 服务器'
+      autoStartDesc: '应用启动时自动启动 MCP 服务器',
+      compactMode: '小窗口模式',
+      compactModeDesc: '窗口宽度设为800px，高度最大化，Feedback页面使用上下布局'
     },
     
     // 主题选项

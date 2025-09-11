@@ -92,7 +92,9 @@ export default {
       theme: 'Theme',
       selectTheme: 'Select Theme',
       autoStart: 'Auto Start',
-      autoStartDesc: 'Automatically start MCP server when app launches'
+      autoStartDesc: 'Automatically start MCP server when app launches',
+      compactMode: 'Compact Mode',
+      compactModeDesc: 'Set window width to 800px, height maximized, Feedback page uses vertical layout'
     },
     
     // Theme options

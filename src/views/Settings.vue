@@ -35,19 +35,38 @@
             </div>
 
             <!-- 自动启动设置 -->
-            <div class="setting-item">
-              <label class="setting-label">{{ $t('settings.general.autoStart') }}</label>
-              <div class="setting-control">
-                <label class="switch">
-                  <input
-                    type="checkbox"
-                    v-model="autoStart"
-                    @change="saveAutoStart"
-                  >
-                  <span class="slider"></span>
-                </label>
-                <span class="setting-description">{{ $t('settings.general.autoStartDesc') }}</span>
+            <div class="setting-item setting-item-toggle">
+              <div class="setting-header">
+                <label class="setting-label">{{ $t('settings.general.autoStart') }}</label>
+                <ToggleSwitch
+                  v-model="autoStart"
+                  @change="saveAutoStart"
+                />
               </div>
+              <p class="setting-description">{{ $t('settings.general.autoStartDesc') }}</p>
+            </div>
+
+            <!-- 小窗口模式设置 -->
+            <div class="setting-item setting-item-toggle">
+              <div class="setting-header">
+                <label class="setting-label">{{ $t('settings.general.compactMode') }}</label>
+                <ToggleSwitch
+                  v-model="compactMode"
+                  @change="saveCompactMode"
+                />
+              </div>
+              <p class="setting-description">{{ $t('settings.general.compactModeDesc') }}</p>
+            </div>
+            
+            <!-- 窗口尺寸测试按钮 -->
+            <div class="setting-item">
+              <label class="setting-label">窗口尺寸管理</label>
+              <div class="button-group">
+                <button @click="saveWindowSize" class="test-btn">保存当前窗口尺寸</button>
+                <button @click="loadWindowSize" class="test-btn">加载保存的尺寸</button>
+                <button @click="applyWindowSize" class="test-btn">应用保存的尺寸</button>
+              </div>
+              <p class="setting-description">测试窗口尺寸的保存和恢复功能</p>
             </div>
           </div>
         </div>
@@ -72,15 +91,21 @@
 
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 import { setLocale, getCurrentLocale, supportedLocales } from '../i18n'
 import { useI18n } from 'vue-i18n'
 import CustomSelect from '../components/CustomSelect.vue'
+import ToggleSwitch from '../components/ToggleSwitch.vue'
 
 const { t } = useI18n()
 
 const selectedLanguage = ref(getCurrentLocale())
 const selectedTheme = ref('auto')
 const autoStart = ref(true)
+const compactMode = ref(false)
+
+// 窗口尺寸状态
+const savedWindowSize = ref<any>(null)
 
 const supportedLanguages = supportedLocales
 
@@ -130,6 +155,64 @@ function saveAutoStart() {
   localStorage.setItem('mcp-manager-auto-start', autoStart.value.toString())
 }
 
+async function saveCompactMode() {
+  localStorage.setItem('mcp-manager-compact-mode', compactMode.value.toString())
+  
+  try {
+    // 调用 Tauri 命令来实际调整窗口大小
+    await invoke('set_window_compact_mode', { compact: compactMode.value })
+    console.log('✅ Window size updated for compact mode:', compactMode.value)
+  } catch (error) {
+    console.error('❌ Failed to update window size:', error)
+  }
+  
+  // 触发全局事件来通知应用布局变化
+  window.dispatchEvent(new CustomEvent('compact-mode-changed', { 
+    detail: { compactMode: compactMode.value } 
+  }))
+}
+
+// 窗口尺寸管理函数
+async function saveWindowSize() {
+  try {
+    await invoke('save_current_window_size')
+    console.log('✅ Window size saved manually')
+    alert('窗口尺寸已保存！')
+  } catch (error) {
+    console.error('❌ Failed to save window size:', error)
+    alert('保存窗口尺寸失败：' + error)
+  }
+}
+
+async function loadWindowSize() {
+  try {
+    const windowSize = await invoke('load_saved_window_size')
+    savedWindowSize.value = windowSize
+    console.log('✅ Window size loaded:', windowSize)
+    alert('窗口尺寸已加载：' + JSON.stringify(windowSize, null, 2))
+  } catch (error) {
+    console.error('❌ Failed to load window size:', error)
+    alert('加载窗口尺寸失败：' + error)
+  }
+}
+
+async function applyWindowSize() {
+  if (!savedWindowSize.value) {
+    await loadWindowSize()
+  }
+  
+  if (savedWindowSize.value) {
+    try {
+      await invoke('apply_window_size', { windowSize: savedWindowSize.value })
+      console.log('✅ Window size applied:', savedWindowSize.value)
+      alert('窗口尺寸已应用！')
+    } catch (error) {
+      console.error('❌ Failed to apply window size:', error)
+      alert('应用窗口尺寸失败：' + error)
+    }
+  }
+}
+
 onMounted(() => {
   // 加载保存的主题设置
   const savedTheme = localStorage.getItem('mcp-manager-theme')
@@ -142,6 +225,12 @@ onMounted(() => {
   const savedAutoStart = localStorage.getItem('mcp-manager-auto-start')
   if (savedAutoStart !== null) {
     autoStart.value = savedAutoStart === 'true'
+  }
+
+  // 加载小窗口模式设置
+  const savedCompactMode = localStorage.getItem('mcp-manager-compact-mode')
+  if (savedCompactMode !== null) {
+    compactMode.value = savedCompactMode === 'true'
   }
 
   // 监听系统主题变化
@@ -197,95 +286,74 @@ onMounted(() => {
   gap: 0.75rem;
 }
 
+/* 开关类设置项使用紧凑布局 */
+.setting-item-toggle {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.setting-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  width: fit-content;
+  max-width: 100%;
+}
+
 .setting-label {
   font-weight: 600;
   color: #374151;
   font-size: 0.875rem;
 }
 
-
-
-
-
-.setting-control {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-}
-
 .setting-description {
   color: #6b7280;
   font-size: 0.875rem;
   line-height: 1.4;
+  margin: 0;
 }
 
-/* 开关样式 */
-.switch {
-  position: relative;
-  display: inline-block;
-  width: 50px;
-  height: 24px;
+/* 按钮组样式 */
+.button-group {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
 }
 
-.switch input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-
-.slider {
-  position: absolute;
+.test-btn {
+  padding: 0.5rem 1rem;
+  border: 1px solid #d1d5db;
+  border-radius: 0.375rem;
+  background: #f9fafb;
+  color: #374151;
+  font-size: 0.875rem;
   cursor: pointer;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: #cbd5e1;
-  transition: 0.3s;
-  border-radius: 24px;
+  transition: all 0.2s ease;
 }
 
-.slider:before {
-  position: absolute;
-  content: "";
-  height: 18px;
-  width: 18px;
-  left: 3px;
-  bottom: 3px;
-  background-color: white;
-  transition: 0.3s;
-  border-radius: 50%;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+.test-btn:hover {
+  background: #f3f4f6;
+  border-color: #9ca3af;
 }
 
-input:checked + .slider {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+.test-btn:active {
+  transform: translateY(1px);
 }
 
-input:checked + .slider:before {
-  transform: translateX(26px);
-}
+
+
+
+
 
 /* 深色模式 */
 @media (prefers-color-scheme: dark) {
   .setting-label {
     color: #f3f4f6;
   }
-
-
-
+  
   .setting-description {
     color: #9ca3af;
-  }
-
-
-
-  .slider {
-    background-color: #4b5563;
-  }
-
-  input:checked + .slider {
-    background: linear-gradient(135deg, #60a5fa 0%, #a78bfa 100%);
   }
 }
 
@@ -293,18 +361,19 @@ input:checked + .slider:before {
   color: #f3f4f6;
 }
 
-
-
 :global(.dark) .setting-description {
   color: #9ca3af;
 }
 
-:global(.dark) .slider {
-  background-color: #4b5563;
+:global(.dark) .test-btn {
+  background: #374151;
+  color: #f3f4f6;
+  border-color: #4b5563;
 }
 
-:global(.dark) input:checked + .slider {
-  background: linear-gradient(135deg, #60a5fa 0%, #a78bfa 100%);
+:global(.dark) .test-btn:hover {
+  background: #4b5563;
+  border-color: #6b7280;
 }
 
 

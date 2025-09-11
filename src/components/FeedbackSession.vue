@@ -1,7 +1,7 @@
 <template>
-  <div class="feedback-session">
-    <!-- 左侧：AI 回答 -->
-    <div class="ai-response-panel">
+  <div class="feedback-session" :class="{ 'compact': isCompactMode }">
+    <!-- 上方：AI 回答 -->
+    <div class="ai-response-panel" :class="{ 'compact': isCompactMode }">
       <div class="panel-header">
         <div class="header-content">
           <h3>{{ $t('feedback.aiResponse') }}</h3>
@@ -25,8 +25,8 @@
       </div>
     </div>
 
-    <!-- 右侧：用户反馈 -->
-    <div class="user-feedback-panel">
+    <!-- 下方：用户反馈 -->
+    <div class="user-feedback-panel" :class="{ 'compact': isCompactMode }">
       <div class="panel-header">
         <h3>{{ $t('feedback.userFeedback') }}</h3>
         <button
@@ -157,6 +157,20 @@ const EMPHASIS_TEXT_STORAGE_KEY = 'feedback_custom_emphasis_text'
 
 // 标记会话是否已结束（提交或取消），防止重复操作
 const sessionEnded = ref(false)
+
+// 检测是否处于小窗口模式
+const isCompactMode = ref(false)
+
+// 更新小窗口模式状态
+function updateCompactMode() {
+  const savedCompactMode = localStorage.getItem('mcp-manager-compact-mode')
+  isCompactMode.value = savedCompactMode === 'true'
+}
+
+// 处理小窗口模式变化事件
+function handleCompactModeChange(event: CustomEvent) {
+  isCompactMode.value = event.detail.compactMode
+}
 
 
 
@@ -310,9 +324,13 @@ onMounted(() => {
   // 加载保存的自定义强调语设置
   loadEmphasisSettings()
   
-  // 添加窗口焦点事件监听器
+  // 初始化小窗口模式状态
+  updateCompactMode()
+  
+  // 添加事件监听器
   window.addEventListener('blur', handleWindowBlur)
   window.addEventListener('focus', handleWindowFocus)
+  window.addEventListener('compact-mode-changed', handleCompactModeChange as EventListener)
   
   nextTick(() => {
     feedbackInput.value?.focus()
@@ -320,9 +338,10 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  // 清理窗口焦点事件监听器
+  // 清理事件监听器
   window.removeEventListener('blur', handleWindowBlur)
   window.removeEventListener('focus', handleWindowFocus)
+  window.removeEventListener('compact-mode-changed', handleCompactModeChange as EventListener)
   
   // 移除自动取消逻辑，只在用户主动关闭时才取消
   // 组件卸载时不再自动取消 feedback 会话
@@ -333,6 +352,7 @@ onUnmounted(() => {
 <style scoped>
 .feedback-session {
   display: flex;
+  flex-direction: row; /* 正常模式：左右布局 */
   height: 100%;
   gap: 1rem;
   padding: 1rem;
@@ -341,9 +361,13 @@ onUnmounted(() => {
   overflow: hidden; /* 防止整个会话区域溢出 */
 }
 
-.ai-response-panel,
-.user-feedback-panel {
-  flex: 1;
+/* 小窗口模式：上下布局 */
+.feedback-session.compact {
+  flex-direction: column;
+}
+
+.ai-response-panel {
+  flex: 1; /* 正常模式左右布局：两个面板等宽 */
   display: flex;
   flex-direction: column;
   background: rgba(255, 255, 255, 0.8);
@@ -351,6 +375,26 @@ onUnmounted(() => {
   border: 1px solid rgba(209, 213, 219, 0.3);
   overflow: hidden;
   min-height: 0; /* 确保 flex 子元素可以收缩 */
+}
+
+.user-feedback-panel {
+  flex: 1; /* 正常模式左右布局：两个面板等宽 */
+  display: flex;
+  flex-direction: column;
+  background: rgba(255, 255, 255, 0.8);
+  border-radius: 0.75rem;
+  border: 1px solid rgba(209, 213, 219, 0.3);
+  overflow: hidden;
+  min-height: 0; /* 确保 flex 子元素可以收缩 */
+}
+
+/* 小窗口模式：调整面板比例 */
+.feedback-session.compact .ai-response-panel {
+  flex: 2; /* 小窗口模式：AI 响应区域占更多空间 */
+}
+
+.feedback-session.compact .user-feedback-panel {
+  flex: 1; /* 小窗口模式：用户反馈区域占较少空间 */
 }
 
 .panel-header {
@@ -534,7 +578,8 @@ onUnmounted(() => {
 
 .feedback-textarea {
   width: 100%;
-  min-height: 240px; /* 从 120px 增加到 240px，高度翻倍 */
+  min-height: 120px; /* 在上下布局中减少高度 */
+  max-height: 180px; /* 限制最大高度 */
   padding: 0.75rem;
   border: 1px solid rgba(209, 213, 219, 0.5);
   border-radius: 0.5rem;
@@ -543,6 +588,55 @@ onUnmounted(() => {
   line-height: 1.5;
   resize: vertical;
   transition: all 0.2s ease;
+}
+
+/* 小窗口模式优化 */
+.feedback-session.compact {
+  padding: 0.75rem;
+  gap: 0.75rem;
+}
+
+.ai-response-panel.compact,
+.user-feedback-panel.compact {
+  border-radius: 0.5rem;
+}
+
+.ai-response-panel.compact .panel-header,
+.user-feedback-panel.compact .panel-header {
+  padding: 0.75rem;
+}
+
+.ai-response-panel.compact .ai-response-content,
+.user-feedback-panel.compact .feedback-content {
+  padding: 0.75rem;
+}
+
+/* 小窗口模式下的上下布局专用样式 */
+.feedback-session.compact .ai-response-panel .header-meta {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.feedback-session.compact .ai-response-panel .context-info,
+.feedback-session.compact .ai-response-panel .ai-source-info {
+  font-size: 0.6875rem;
+  padding: 0.125rem 0.375rem;
+}
+
+.feedback-session.compact .user-feedback-panel .feedback-textarea {
+  min-height: 80px;
+  max-height: 120px;
+  font-size: 0.8125rem;
+}
+
+.feedback-session.compact .user-feedback-panel .custom-emphasis-section {
+  padding: 0.5rem;
+}
+
+.feedback-session.compact .user-feedback-panel .emphasis-input {
+  padding: 0.375rem 0.5rem;
+  font-size: 0.8125rem;
 }
 
 .feedback-textarea:focus {

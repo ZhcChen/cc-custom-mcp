@@ -13,6 +13,28 @@ use std::fs;
 use std::path::PathBuf;
 use tauri::{AppHandle, State, Emitter, Manager};
 use serde_json::{json, Value};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct WindowSize {
+    width: u32,
+    height: u32,
+    x: Option<i32>,
+    y: Option<i32>,
+    maximized: bool,
+}
+
+impl Default for WindowSize {
+    fn default() -> Self {
+        WindowSize {
+            width: 1200,
+            height: 800,
+            x: None,
+            y: None,
+            maximized: true,
+        }
+    }
+}
 
 struct AppState {
     mcp_server: Arc<Mutex<Option<LocalMcpServer>>>,
@@ -26,6 +48,50 @@ fn get_shared_storage_dir() -> PathBuf {
     let mut path = std::env::temp_dir();
     path.push("mcp_manager");
     path
+}
+
+fn get_window_config_path() -> PathBuf {
+    let mut path = get_shared_storage_dir();
+    fs::create_dir_all(&path).ok();
+    path.push("window_config.json");
+    path
+}
+
+fn save_window_size(window_size: &WindowSize) -> Result<(), String> {
+    let config_path = get_window_config_path();
+    let json_content = serde_json::to_string_pretty(window_size)
+        .map_err(|e| format!("Failed to serialize window size: {}", e))?;
+    
+    fs::write(&config_path, json_content)
+        .map_err(|e| format!("Failed to save window config: {}", e))?;
+    
+    eprintln!("✅ Window size saved: {}x{}, maximized: {}", 
+              window_size.width, window_size.height, window_size.maximized);
+    Ok(())
+}
+
+fn load_window_size() -> WindowSize {
+    let config_path = get_window_config_path();
+    
+    match fs::read_to_string(&config_path) {
+        Ok(content) => {
+            match serde_json::from_str::<WindowSize>(&content) {
+                Ok(window_size) => {
+                    eprintln!("✅ Window size loaded: {}x{}, maximized: {}", 
+                              window_size.width, window_size.height, window_size.maximized);
+                    window_size
+                }
+                Err(e) => {
+                    eprintln!("❌ Failed to parse window config: {}, using default", e);
+                    WindowSize::default()
+                }
+            }
+        }
+        Err(_) => {
+            eprintln!("📁 No window config found, using default size");
+            WindowSize::default()
+        }
+    }
 }
 
 fn get_feedback_request_path(session_id: &str) -> PathBuf {
@@ -327,8 +393,120 @@ async fn bring_window_to_front(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn set_window_compact_mode(app: AppHandle, compact: bool) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("main") {
+        // 获取屏幕尺寸
+        let current_monitor = window.current_monitor().map_err(|e| e.to_string())?;
+        if let Some(monitor) = current_monitor {
+            let monitor_size = monitor.size();
+            let scale_factor = monitor.scale_factor();
+            
+            // 计算实际屏幕尺寸（考虑缩放）
+            let screen_width = (monitor_size.width as f64 / scale_factor) as u32;
+            let screen_height = (monitor_size.height as f64 / scale_factor) as u32;
+            
+            if compact {
+                // 小窗口模式：宽度固定为 800 像素，高度最大化（使用整个屏幕高度）
+                let compact_width = 800u32;
+                let compact_height = screen_height; // 高度为屏幕的最大高度
+                
+                eprintln!("🔧 Setting compact mode: screen={}x{}, target={}x{}", screen_width, screen_height, compact_width, compact_height);
+                
+                // 先取消最大化，这样才能调整窗口大小
+                window.unmaximize().map_err(|e| e.to_string())?;
+                eprintln!("✅ Window unmaximized");
+                
+                // 设置窗口大小
+                window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
+                    width: compact_width,
+                    height: compact_height,
+                })).map_err(|e| e.to_string())?;
+                eprintln!("✅ Window size set to {}x{}", compact_width, compact_height);
+                
+                // 将窗口移动到屏幕右侧
+                let x_position = (screen_width - compact_width) as i32;
+                window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+                    x: x_position,
+                    y: 0, // 窗口顶部与屏幕顶部对齐
+                })).map_err(|e| e.to_string())?;
+                eprintln!("✅ Window positioned at ({}, 0)", x_position);
+                
+            } else {
+                // 普通模式：最大化窗口
+                window.maximize().map_err(|e| e.to_string())?;
+            }
+            
+            Ok(())
+        } else {
+            Err("No monitor found".to_string())
+        }
+    } else {
+        Err("Main window not found".to_string())
+    }
+}
+
+#[tauri::command]
 async fn play_notification_sound() -> Result<(), String> {
     play_notification_sound_async().await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn save_current_window_size(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("main") {
+        let size = window.inner_size().map_err(|e| e.to_string())?;
+        let position = window.outer_position().map_err(|e| e.to_string())?;
+        let is_maximized = window.is_maximized().map_err(|e| e.to_string())?;
+        
+        let window_size = WindowSize {
+            width: size.width,
+            height: size.height,
+            x: Some(position.x),
+            y: Some(position.y),
+            maximized: is_maximized,
+        };
+        
+        save_window_size(&window_size)?;
+        Ok(())
+    } else {
+        Err("Main window not found".to_string())
+    }
+}
+
+#[tauri::command]
+async fn load_saved_window_size() -> Result<WindowSize, String> {
+    Ok(load_window_size())
+}
+
+#[tauri::command]
+async fn apply_window_size(app: AppHandle, window_size: WindowSize) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("main") {
+        if window_size.maximized {
+            window.maximize().map_err(|e| e.to_string())?;
+        } else {
+            // 先取消最大化
+            window.unmaximize().map_err(|e| e.to_string())?;
+            
+            // 设置窗口大小
+            window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
+                width: window_size.width,
+                height: window_size.height,
+            })).map_err(|e| e.to_string())?;
+            
+            // 如果有位置信息，设置窗口位置
+            if let (Some(x), Some(y)) = (window_size.x, window_size.y) {
+                window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+                    x,
+                    y,
+                })).map_err(|e| e.to_string())?;
+            }
+        }
+        
+        eprintln!("✅ Applied window size: {}x{}, maximized: {}", 
+                  window_size.width, window_size.height, window_size.maximized);
+        Ok(())
+    } else {
+        Err("Main window not found".to_string())
+    }
 }
 
 #[tauri::command]
@@ -462,11 +640,60 @@ pub fn run() {
             cancel_feedback,
             bring_window_to_front,
             play_notification_sound,
-            scan_pending_feedback
+            scan_pending_feedback,
+            set_window_compact_mode,
+            save_current_window_size,
+            load_saved_window_size,
+            apply_window_size
         ])
         .setup(|app| {
             let state: State<AppState> = app.state();
             start_file_watcher(app.handle().clone(), state.file_watcher_stop.clone());
+            
+            // 在应用启动时加载保存的窗口尺寸
+            let app_handle = app.handle().clone();
+            thread::spawn(move || {
+                // 等待一点时间，确保窗口完全初始化
+                thread::sleep(Duration::from_millis(500));
+                
+                let window_size = load_window_size();
+                if let Some(window) = app_handle.get_webview_window("main") {
+                    if window_size.maximized {
+                        if let Err(e) = window.maximize() {
+                            eprintln!("❌ Failed to maximize window: {}", e);
+                        }
+                    } else {
+                        // 先取消最大化
+                        if let Err(e) = window.unmaximize() {
+                            eprintln!("❌ Failed to unmaximize window: {}", e);
+                        }
+                        
+                        // 设置窗口大小
+                        if let Err(e) = window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
+                            width: window_size.width,
+                            height: window_size.height,
+                        })) {
+                            eprintln!("❌ Failed to set window size: {}", e);
+                        }
+                        
+                        // 如果有位置信息，设置窗口位置
+                        if let (Some(x), Some(y)) = (window_size.x, window_size.y) {
+                            if let Err(e) = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+                                x,
+                                y,
+                            })) {
+                                eprintln!("❌ Failed to set window position: {}", e);
+                            }
+                        }
+                    }
+                    
+                    eprintln!("🚀 Window size restored on startup: {}x{}, maximized: {}", 
+                              window_size.width, window_size.height, window_size.maximized);
+                } else {
+                    eprintln!("❌ Main window not found during startup");
+                }
+            });
+            
             Ok(())
         })
         .run(tauri::generate_context!())
