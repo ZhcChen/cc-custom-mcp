@@ -201,6 +201,7 @@ function getTabTooltip(tab: TabItem): string {
   transition: all 0.3s ease;
   white-space: nowrap;
   min-width: fit-content;
+  max-width: 280px; /* 设置最大宽度 */
   border-radius: 0.375rem 0.375rem 0 0;
 }
 
@@ -222,6 +223,8 @@ function getTabTooltip(tab: TabItem): string {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  max-width: 160px; /* 为标题设置最大宽度，确保有足够空间给其他元素 */
+  min-width: 0; /* 允许收缩 */
 }
 
 /* AI 来源标签样式 */

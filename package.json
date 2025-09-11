@@ -11,8 +11,7 @@
     "tauri:build": "node scripts/update-app-name.cjs && tauri build && node scripts/restore-app-name.cjs",
     "build:all": "bash scripts/build-all.sh",
     "build:macos": "NODE_ENV=production node scripts/update-app-name.cjs && tauri build --target aarch64-apple-darwin && tauri build --target x86_64-apple-darwin && node scripts/restore-app-name.cjs",
-    "build:windows": "NODE_ENV=production node scripts/update-app-name.cjs && tauri build --target aarch64-pc-windows-msvc && tauri build --target x86_64-pc-windows-msvc && node scripts/restore-app-name.cjs",
-    "build:windows-gnu": "NODE_ENV=production node scripts/update-app-name.cjs && tauri build --target x86_64-pc-windows-gnu && node scripts/restore-app-name.cjs",
+    "build:windows": "NODE_ENV=production node scripts/update-app-name.cjs && tauri build --runner cargo-xwin --target aarch64-pc-windows-msvc && tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc && node scripts/restore-app-name.cjs",
     "build:linux": "NODE_ENV=production node scripts/update-app-name.cjs && tauri build --target aarch64-unknown-linux-gnu && tauri build --target x86_64-unknown-linux-gnu && node scripts/restore-app-name.cjs",
     "build:mcp": "bash scripts/dev-mcp-server.sh"
   },

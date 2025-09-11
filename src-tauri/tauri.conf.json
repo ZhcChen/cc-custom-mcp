@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "ccMCP",
+  "productName": "cc-custom-mcp",
   "version": "0.1.0",
   "identifier": "org.nsngc.cc-custom-mcp",
   "build": {
@@ -35,6 +35,19 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "macOS": {
+      "signingIdentity": "cc-custom-mcp Local Development",
+      "providerShortName": null,
+      "entitlements": null,
+      "exceptionDomain": null,
+      "frameworks": [],
+      "minimumSystemVersion": "10.13"
+    },
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": null
+    }
   }
 }
